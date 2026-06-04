@@ -6,7 +6,6 @@ const MENU = [
   ["dashboard", "🏠", "Início"],
   ["atendimentos", "🧾", "Atendimentos"],
   ["clientes", "👤", "Clientes"],
-  ["carros", "🚗", "Carros"],
   ["parceiros", "🤝", "Parceiros"],
   ["funcionarios", "👷", "Funcionários"],
   ["presenca", "📋", "Presença"],
@@ -97,7 +96,6 @@ const ROUTES = {
   dashboard: viewDashboard,
   atendimentos: viewAtendimentos,
   clientes: viewClientes,
-  carros: viewCarros,
   parceiros: viewParceiros,
   funcionarios: viewFuncionarios,
   presenca: viewPresenca,
@@ -319,40 +317,84 @@ async function viewAtendimentos() {
 
 // ============================================================ CLIENTES
 async function viewClientes() {
-  const list = await db.clientes.list();
+  const [list, allCarros] = await Promise.all([db.clientes.list(), db.carros.list()]);
+  const carrosByCli = {};
+  allCarros.forEach((c) => { (carrosByCli[c.cliente_id] = carrosByCli[c.cliente_id] || []).push(c); });
+
   const render = (rows) => `<div class="table-wrap"><table>
-    <thead><tr><th>Nome</th><th>Telefone</th><th>Origem</th><th>Base</th><th></th></tr></thead>
+    <thead><tr><th>Nome</th><th>Telefone</th><th>Base</th><th>Carros</th><th></th></tr></thead>
     <tbody>${rows
-      .map(
-        (c) => `<tr>
-        <td><strong>${esc(c.nome)}</strong></td>
-        <td>${esc(c.telefone || "—")}</td>
-        <td>${esc(c.origem || "")}</td>
-        <td>${c.base_antiga ? '<span class="tag yuri">Yuri 40/60</span>' : '<span class="tag">50/50</span>'}</td>
-        <td class="r"><button class="btn small ghost" data-edit="${c.id}">Editar</button></td>
-      </tr>`
-      )
+      .map((c) => {
+        const cars = carrosByCli[c.id] || [];
+        const chips = cars.length
+          ? cars.map((x) => `<span class="tag">${esc(x.placa)}${x.veiculo ? " · " + esc(x.veiculo) : ""}</span>`).join(" ")
+          : '<span class="muted small">sem carro</span>';
+        return `<tr>
+          <td><strong>${esc(c.nome)}</strong></td>
+          <td>${esc(c.telefone || "—")}</td>
+          <td>${c.base_antiga ? '<span class="tag yuri">Yuri 40/60</span>' : '<span class="tag">50/50</span>'}</td>
+          <td class="chips-cell">${chips}</td>
+          <td class="r"><button class="btn small ghost" data-open="${c.id}">Abrir</button></td>
+        </tr>`;
+      })
       .join("")}</tbody></table></div>`;
 
   $("#view").innerHTML = `
     <div class="toolbar">
-      <input id="q" class="search" placeholder="Buscar cliente…" />
+      <input id="q" class="search" placeholder="Buscar cliente ou placa…" />
       <button class="btn primary" id="add">+ Cliente</button>
     </div>
     <div id="tbl">${render(list)}</div>`;
 
-  const bind = () =>
-    $$("[data-edit]").forEach((b) => (b.onclick = () => formCliente(list.find((c) => c.id === b.dataset.edit))));
+  const bind = () => $$("[data-open]").forEach((b) => (b.onclick = () => clienteDetalhe(b.dataset.open)));
   bind();
   $("#add").onclick = () => formCliente();
   $("#q").oninput = (e) => {
     const t = norm(e.target.value);
-    $("#tbl").innerHTML = render(list.filter((c) => [c.nome, c.telefone].map(norm).some((x) => x.includes(t))));
+    const f = list.filter((c) =>
+      [c.nome, c.telefone].map(norm).some((x) => x.includes(t)) ||
+      (carrosByCli[c.id] || []).some((car) => norm(car.placa).includes(t) || norm(car.veiculo).includes(t))
+    );
+    $("#tbl").innerHTML = render(f);
     bind();
   };
 }
 
-function formCliente(c = null) {
+// Detalhe do cliente com seus carros (1 cliente → N carros).
+async function clienteDetalhe(cid) {
+  const [c, cars] = await Promise.all([db.clientes.byId(cid), db.carros.byCliente(cid)]);
+  const reopen = () => clienteDetalhe(cid);
+  const tel = (c.telefone || "").replace(/\D/g, "");
+  const wa = tel ? `https://wa.me/55${tel}` : null;
+  const { card } = openModal(c.nome, `
+    <div class="row between" style="margin-bottom:8px">
+      <div>
+        <div class="muted small">${esc(c.origem || "PARTICULAR")} · ${c.base_antiga ? "base antiga (Yuri 40/60)" : "50/50"}</div>
+        <div style="margin-top:4px">${esc(c.telefone || "sem telefone")}
+          ${wa ? `<a class="btn small wa" href="${wa}" target="_blank" rel="noopener">WhatsApp</a>` : ""}</div>
+      </div>
+      <button class="btn small ghost" id="editCli">Editar</button>
+    </div>
+    ${c.observacoes ? `<p class="muted small">${esc(c.observacoes)}</p>` : ""}
+    <hr/>
+    <div class="card-head"><h4 class="sec-title">Carros (${cars.length})</h4>
+      <button class="btn small primary" id="addCar">+ Carro</button></div>
+    <div class="list">
+      ${cars.length
+        ? cars.map((x) => `<div class="list-row">
+            <div><strong>${esc(x.placa)}</strong> ${x.veiculo ? `· ${esc(x.veiculo)}` : ""}
+              ${x.cor ? `<small class="muted">${esc(x.cor)}</small>` : ""}</div>
+            <button class="btn small ghost" data-edit-car="${x.id}">Editar</button>
+          </div>`).join("")
+        : `<div class="empty small">Nenhum carro cadastrado.</div>`}
+    </div>`);
+
+  $("#editCli", card).onclick = () => formCliente(c, reopen);
+  $("#addCar", card).onclick = () => formCarro(null, cid, reopen);
+  $$("[data-edit-car]", card).forEach((b) => (b.onclick = () => formCarro(cars.find((x) => x.id === b.dataset.editCar), cid, reopen)));
+}
+
+function formCliente(c = null, onDone = route) {
   const { close } = openModal(c ? "Editar cliente" : "Novo cliente", `
     <form id="f" class="form">
       <label>Nome<input name="nome" required value="${esc(c?.nome || "")}" /></label>
@@ -374,7 +416,7 @@ function formCliente(c = null) {
       c ? await db.clientes.update(c.id, d) : await db.clientes.create(d);
       toast("Cliente salvo.");
       close();
-      route();
+      onDone();
     } catch (err) { toast(err.message, "err"); }
   };
   if (c) $("[data-del]").onclick = async () => {
@@ -384,43 +426,11 @@ function formCliente(c = null) {
   };
 }
 
-// ============================================================ CARROS
-async function viewCarros() {
-  const [list, cli] = await Promise.all([db.carros.list(), db.clientes.list()]);
-  const render = (rows) => `<div class="table-wrap"><table>
-    <thead><tr><th>Placa</th><th>Veículo</th><th>Cliente</th><th></th></tr></thead>
-    <tbody>${rows
-      .map(
-        (c) => `<tr>
-        <td><strong>${esc(c.placa)}</strong></td>
-        <td>${esc(c.veiculo || "—")}${c.cor ? ` · ${esc(c.cor)}` : ""}</td>
-        <td>${esc(c.clientes?.nome || "—")}</td>
-        <td class="r"><button class="btn small ghost" data-edit="${c.id}">Editar</button></td>
-      </tr>`
-      )
-      .join("")}</tbody></table></div>`;
-  $("#view").innerHTML = `
-    <div class="toolbar">
-      <input id="q" class="search" placeholder="Buscar placa ou veículo…" />
-      <button class="btn primary" id="add">+ Carro</button>
-    </div>
-    <div id="tbl">${render(list)}</div>`;
-  const bind = () => $$("[data-edit]").forEach((b) => (b.onclick = () => formCarro(list.find((x) => x.id === b.dataset.edit), cli)));
-  bind();
-  $("#add").onclick = () => formCarro(null, cli);
-  $("#q").oninput = (e) => {
-    const t = norm(e.target.value);
-    $("#tbl").innerHTML = render(list.filter((c) => [c.placa, c.veiculo, c.clientes?.nome].map(norm).some((x) => x.includes(t))));
-    bind();
-  };
-}
-
-function formCarro(c, cli) {
-  const opts = cli.map((x) => `<option value="${x.id}" ${c?.cliente_id === x.id ? "selected" : ""}>${esc(x.nome)}</option>`).join("");
+// Carro sempre vinculado a um cliente (clienteId fixo).
+function formCarro(c, clienteId, onDone = route) {
   const { close } = openModal(c ? "Editar carro" : "Novo carro", `
     <form id="f" class="form">
-      <label>Cliente<select name="cliente_id" required><option value="">—</option>${opts}</select></label>
-      <label>Placa<input name="placa" required value="${esc(c?.placa || "")}" /></label>
+      <label>Placa<input name="placa" required value="${esc(c?.placa || "")}" style="text-transform:uppercase"/></label>
       <label>Veículo<input name="veiculo" value="${esc(c?.veiculo || "")}" placeholder="HRV, Civic, Moto…" /></label>
       <label>Cor<input name="cor" value="${esc(c?.cor || "")}" /></label>
       <div class="row gap end">
@@ -431,11 +441,12 @@ function formCarro(c, cli) {
   $("#f").onsubmit = async (e) => {
     e.preventDefault();
     const d = formData(e.target);
-    try { c ? await db.carros.update(c.id, d) : await db.carros.create(d); toast("Carro salvo."); close(); route(); }
+    d.cliente_id = clienteId;
+    try { c ? await db.carros.update(c.id, d) : await db.carros.create(d); toast("Carro salvo."); close(); onDone(); }
     catch (err) { toast(err.message, "err"); }
   };
   if (c) $("[data-del]").onclick = async () => {
-    if (await confirmDialog(`Excluir o carro ${c.placa}?`)) { await db.carros.remove(c.id); toast("Excluído."); close(); route(); }
+    if (await confirmDialog(`Excluir o carro ${c.placa}?`)) { await db.carros.remove(c.id); toast("Excluído."); close(); onDone(); }
   };
 }
 
