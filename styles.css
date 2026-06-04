@@ -118,6 +118,8 @@ textarea { min-height: 60px; resize: vertical; }
 
 /* ---------- LIST / TABLE ---------- */
 .list { display: flex; flex-direction: column; }
+.opor-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 0 24px; }
+.opor-grid .list-row { border-bottom: 1px solid var(--line); }
 .list-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .list-row:last-child { border-bottom: none; }
 .table-wrap { overflow-x: auto; }

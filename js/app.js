@@ -130,10 +130,9 @@ const kpi = (label, value, hint = "") =>
 
 // ============================================================ DASHBOARD
 async function viewDashboard() {
-  const [ats, oportRaw, rateio] = await Promise.all([
+  const [ats, oportRaw] = await Promise.all([
     db.atendimentos.list(500),
     db.views.ultimaLavagem(),
-    db.views.rateio(),
   ]);
   const hoje = today();
   const mesAtual = hoje.slice(0, 7);
@@ -144,7 +143,6 @@ async function viewDashboard() {
   const pendValor = pendentes.reduce((s, a) => s + Number(a.valor || 0), 0);
 
   const opor = (oportRaw || []).filter((o) => o.dias_sem_lavar >= 15);
-  const r = (rateio || []).find((x) => String(x.mes).slice(0, 7) === mesAtual) || {};
 
   $("#view").innerHTML = `
     <div class="kpis">
@@ -154,46 +152,29 @@ async function viewDashboard() {
       ${kpi("A receber", money(pendValor), `${pendentes.length} pendência(s)`)}
     </div>
 
-    <div class="grid-2">
-      ${card(`
-        <div class="card-head"><h3>🎯 Oportunidades</h3><span class="badge">${opor.length}</span></div>
-        <p class="muted small">Clientes há 15+ dias sem lavar — hora de chamar de volta.</p>
-        <div class="list">
-          ${
-            opor.length
-              ? opor
-                  .slice(0, 30)
-                  .map((o) => {
-                    const tel = (o.telefone || "").replace(/\D/g, "");
-                    const wa = tel ? `https://wa.me/55${tel}` : null;
-                    return `<div class="list-row">
-                      <div><strong>${esc(o.nome)}</strong><br><small class="muted">${o.dias_sem_lavar} dias · última ${dateBR(o.ultima_data)}</small></div>
-                      <div class="row gap">
-                        ${o.telefone ? `<span class="muted small">${esc(o.telefone)}</span>` : ""}
-                        ${wa ? `<a class="btn small wa" href="${wa}" target="_blank" rel="noopener">WhatsApp</a>` : ""}
-                      </div>
-                    </div>`;
-                  })
-                  .join("")
-              : `<div class="empty">Nenhuma oportunidade no momento 🎉</div>`
-          }
-        </div>
-      `)}
-
-      ${card(`
-        <div class="card-head"><h3>👥 Distribuição de lucro (mês)</h3></div>
-        <p class="muted small">Sobre as entradas. Base antiga (tag Yuri): Rennan 40% / Yuri 60%. Demais: 50% / 50%.</p>
-        <div class="split">
-          <div class="split-box"><span>Rennan</span><strong>${money(r.rennan)}</strong></div>
-          <div class="split-box"><span>Yuri</span><strong>${money(r.yuri)}</strong></div>
-        </div>
-        <div class="list" style="margin-top:12px">
-          <div class="list-row"><span class="muted">Entradas base antiga</span><strong>${money(r.entradas_base_antiga)}</strong></div>
-          <div class="list-row"><span class="muted">Entradas comuns</span><strong>${money(r.entradas_comuns)}</strong></div>
-          <div class="list-row"><span class="muted">Total de entradas</span><strong>${money(r.entradas_total)}</strong></div>
-        </div>
-      `)}
-    </div>
+    ${card(`
+      <div class="card-head"><h3>🎯 Oportunidades</h3><span class="badge">${opor.length}</span></div>
+      <p class="muted small">Clientes há 15+ dias sem lavar — hora de chamar de volta.</p>
+      <div class="list opor-grid">
+        ${
+          opor.length
+            ? opor
+                .map((o) => {
+                  const tel = (o.telefone || "").replace(/\D/g, "");
+                  const wa = tel ? `https://wa.me/55${tel}` : null;
+                  return `<div class="list-row">
+                    <div><strong>${esc(o.nome)}</strong><br><small class="muted">${o.dias_sem_lavar} dias · última ${dateBR(o.ultima_data)}</small></div>
+                    <div class="row gap">
+                      ${o.telefone ? `<span class="muted small">${esc(o.telefone)}</span>` : ""}
+                      ${wa ? `<a class="btn small wa" href="${wa}" target="_blank" rel="noopener">WhatsApp</a>` : ""}
+                    </div>
+                  </div>`;
+                })
+                .join("")
+            : `<div class="empty">Nenhuma oportunidade no momento 🎉</div>`
+        }
+      </div>
+    `)}
 
     ${card(`
       <div class="card-head"><h3>🕒 Últimos atendimentos</h3></div>
