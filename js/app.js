@@ -31,7 +31,7 @@ function renderSetup() {
   $("#app").innerHTML = `
     <div class="auth">
       <div class="auth-card">
-        <div class="brand">🚿 Lava Rápidos</div>
+        <img class="brand-logo" src="assets/logo.png" alt="NexGarage" />
         <h2>Configuração necessária</h2>
         <p class="muted">Preencha <code>app/config.js</code> com a URL e a anon key do seu projeto
         Supabase. Veja o <strong>README</strong> para o passo a passo (2 minutos).</p>
@@ -43,8 +43,8 @@ function renderLogin() {
   $("#app").innerHTML = `
     <div class="auth">
       <form class="auth-card" id="loginForm">
-        <div class="brand">🚿 Lava Rápidos</div>
-        <p class="muted">Top Line Higienizações</p>
+        <img class="brand-logo" src="assets/logo.png" alt="NexGarage" />
+        <p class="muted">Top Line Higienizações · Lava Rápidos</p>
         <label>E-mail<input name="email" type="email" required autocomplete="username" /></label>
         <label>Senha<input name="password" type="password" required autocomplete="current-password" /></label>
         <button class="btn primary block" type="submit">Entrar</button>
@@ -63,7 +63,7 @@ function renderShell() {
   $("#app").innerHTML = `
     <div class="shell">
       <aside class="sidebar" id="sidebar">
-        <div class="brand">🚿 Lava Rápidos</div>
+        <img class="brand-logo side" src="assets/logo.png" alt="NexGarage" />
         <nav id="nav"></nav>
         <button class="btn ghost block" id="logout">Sair</button>
       </aside>
@@ -199,12 +199,14 @@ async function viewDashboard() {
       <div class="card-head"><h3>🕒 Últimos atendimentos</h3></div>
       ${tableAtend(ats.slice(0, 8))}
     `)}`;
+
+  bindAtendEdits(ats);
 }
 
 function tableAtend(list) {
   if (!list.length) return `<div class="empty">Sem atendimentos.</div>`;
   return `<div class="table-wrap"><table>
-    <thead><tr><th>Data</th><th>OS</th><th>Cliente / Parceiro</th><th>Veículo</th><th>Serviços</th><th class="r">Valor</th><th>Pg</th></tr></thead>
+    <thead><tr><th>Data</th><th>OS</th><th>Cliente / Parceiro</th><th>Veículo</th><th>Serviços</th><th class="r">Valor</th><th>Pg</th><th></th></tr></thead>
     <tbody>
       ${list
         .map((a) => {
@@ -217,10 +219,98 @@ function tableAtend(list) {
             <td>${esc(a.servicos || "")}</td>
             <td class="r">${money(a.valor)}</td>
             <td>${a.status_pg === "PAGO" ? '<span class="tag ok">pago</span>' : '<span class="tag warn">pend.</span>'}</td>
+            <td class="r"><button class="btn small ghost" data-edit-at="${a.id}">Editar</button></td>
           </tr>`;
         })
         .join("")}
     </tbody></table></div>`;
+}
+
+// Sincroniza o lançamento financeiro de ENTRADA conforme o status de pagamento.
+async function syncFinanceiro(atend) {
+  const existentes = await db.financeiro.byAtendimento(atend.id);
+  if (atend.status_pg === "PAGO") {
+    const desc = `${atend.os_numero || "OS"} · ${atend.servicos || ""}`;
+    if (existentes.length) {
+      await db.financeiro.update(existentes[0].id, {
+        valor: atend.valor, descricao: desc, forma_pgto: atend.forma_pgto,
+        base_antiga: atend.base_antiga, data: atend.data_pg || atend.data,
+      });
+    } else {
+      await db.financeiro.create({
+        data: atend.data_pg || atend.data, tipo: "ENTRADA", atendimento_id: atend.id,
+        descricao: desc, valor: atend.valor, forma_pgto: atend.forma_pgto, base_antiga: atend.base_antiga,
+      });
+    }
+  } else if (existentes.length) {
+    await db.financeiro.removeByAtendimento(atend.id); // voltou a pendente: tira do caixa
+  }
+}
+
+async function editAtendimento(a) {
+  const servCat = await db.servicos.list();
+  const quem = a.tipo === "PARCEIRO" ? a.parceiros?.nome : a.clientes?.nome;
+  const chips = servCat
+    .filter((s) => s.ativo !== false)
+    .map((s) => `<button class="chip" type="button" data-add="${esc(s.nome)}" data-preco="${s.preco_base || 0}">+ ${esc(s.nome)} · ${money(s.preco_base)}</button>`)
+    .join("");
+  const { card, close } = openModal(`Editar ${a.os_numero || "atendimento"}`, `
+    <p class="muted small">${a.tipo === "PARCEIRO" ? "🤝" : "🚗"} ${esc(quem || "—")} — ${esc(a.veiculo || "")} ${esc(a.placa || "")}</p>
+    <form id="f" class="form">
+      <label>Data<input name="data" type="date" value="${esc(String(a.data).slice(0, 10))}"/></label>
+      <label>Serviços<input name="servicos" id="servEdit" value="${esc(a.servicos || "")}"/></label>
+      <div class="chips" style="margin:-4px 0 4px">${chips}</div>
+      <div class="grid-form">
+        <label>Valor<input name="valor" id="valEdit" type="number" step="0.01" value="${a.valor || 0}"/></label>
+        <label>Forma de pagamento
+          <select name="forma_pgto">
+            ${["PIX", "DINHEIRO", "CARTAO", ""].map((o) => `<option ${a.forma_pgto === o ? "selected" : ""} value="${o}">${o || "—"}</option>`).join("")}
+          </select></label>
+      </div>
+      <label>Status de pagamento
+        <select name="status_pg">
+          <option value="PENDENTE" ${a.status_pg === "PENDENTE" ? "selected" : ""}>Pendente</option>
+          <option value="PAGO" ${a.status_pg === "PAGO" ? "selected" : ""}>Pago</option>
+        </select></label>
+      <label>Observações<input name="observacoes" value="${esc(a.observacoes || "")}"/></label>
+      <div class="row gap end">
+        <button type="button" class="btn danger" data-del>Excluir</button>
+        <button class="btn primary" type="submit">Salvar</button>
+      </div>
+    </form>`);
+
+  // chips somam ao valor e anexam ao texto de serviços
+  $$("[data-add]", card).forEach((b) => (b.onclick = () => {
+    const sEl = $("#servEdit", card), vEl = $("#valEdit", card);
+    sEl.value = sEl.value.trim() ? `${sEl.value.trim()} + ${b.dataset.add}` : b.dataset.add;
+    vEl.value = (Number(vEl.value || 0) + Number(b.dataset.preco || 0)).toFixed(2);
+  }));
+
+  $("#f", card).onsubmit = async (e) => {
+    e.preventDefault();
+    const d = formData(e.target);
+    d.valor = Number(d.valor || 0);
+    d.data_pg = d.status_pg === "PAGO" ? (a.data_pg || d.data) : null;
+    try {
+      const upd = await db.atendimentos.update(a.id, d);
+      await syncFinanceiro({ ...a, ...d, ...upd });
+      toast("Atendimento atualizado.");
+      close();
+      route();
+    } catch (err) { toast(err.message, "err"); }
+  };
+  $("[data-del]", card).onclick = async () => {
+    if (await confirmDialog(`Excluir ${a.os_numero || "este atendimento"}? O lançamento de caixa vinculado também será removido.`)) {
+      await db.financeiro.removeByAtendimento(a.id);
+      await db.atendimentos.remove(a.id);
+      toast("Excluído."); close(); route();
+    }
+  };
+}
+
+// Liga os botões "Editar" da tabela de atendimentos dentro de um container.
+function bindAtendEdits(list, root = document) {
+  $$("[data-edit-at]", root).forEach((b) => (b.onclick = () => editAtendimento(list.find((a) => a.id === b.dataset.editAt))));
 }
 
 // ============================================================ ATENDIMENTOS
@@ -233,6 +323,7 @@ async function viewAtendimentos() {
     </div>
     <div id="atTable">${tableAtend(list)}</div>`;
   $("#novo2").onclick = () => renderNovoRegistro({ onSaved: route });
+  bindAtendEdits(list);
   $("#q").oninput = (e) => {
     const t = norm(e.target.value);
     const f = list.filter((a) =>
@@ -241,6 +332,7 @@ async function viewAtendimentos() {
         .some((x) => x.includes(t))
     );
     $("#atTable").innerHTML = tableAtend(f);
+    bindAtendEdits(list);
   };
 }
 
@@ -489,36 +581,90 @@ function formFunc(f = null) {
 
 // ============================================================ PRESENÇA
 async function viewPresenca() {
-  const d = today();
-  const [funcs, pres] = await Promise.all([db.funcionarios.list(), db.presenca.byData(d)]);
-  const ativos = funcs.filter((f) => f.ativo !== false);
-  const map = Object.fromEntries(pres.map((p) => [p.funcionario_id, p]));
+  const funcs = (await db.funcionarios.list()).filter((f) => f.ativo !== false);
+  const ps = { data: today(), filtro: "" };
+
   $("#view").innerHTML = `
     <div class="card">
-      <div class="card-head"><h3>Presença — ${dateBR(d)}</h3></div>
-      <div class="list">
-        ${ativos
-          .map((f) => {
-            const p = map[f.id];
-            return `<div class="list-row">
-              <strong>${esc(f.nome)}</strong>
-              <div class="row gap" data-func="${f.id}">
-                <button class="btn small ${p?.status === "PRESENTE" ? "ok-active" : "ghost"}" data-st="PRESENTE">Presente</button>
-                <button class="btn small ${p?.status === "FALTA" ? "danger" : "ghost"}" data-st="FALTA">Falta</button>
-              </div>
-            </div>`;
-          })
-          .join("")}
+      <div class="card-head">
+        <h3>Lançar presença</h3>
+        <label class="inline-date">Dia <input type="date" id="presData" value="${ps.data}" max="${today()}"/></label>
       </div>
+      <div id="marcar" class="list"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>Histórico</h3>
+        <select id="presFiltro" class="mini">
+          <option value="">Todos os colaboradores</option>
+          ${funcs.map((f) => `<option value="${f.id}">${esc(f.nome)}</option>`).join("")}
+        </select>
+      </div>
+      <div id="histResumo" class="chips" style="margin-bottom:12px"></div>
+      <div id="histTabela"></div>
     </div>`;
-  $$("[data-func]").forEach((wrap) => {
-    $$("[data-st]", wrap).forEach((b) => (b.onclick = async () => {
-      const hora = new Date().toTimeString().slice(0, 8);
-      await db.presenca.upsert({ data: d, funcionario_id: wrap.dataset.func, status: b.dataset.st, hora });
-      toast("Presença registrada.");
-      route();
-    }));
-  });
+
+  async function renderMarcar() {
+    const host = $("#marcar");
+    host.innerHTML = `<div class="loading small">Carregando…</div>`;
+    const pres = await db.presenca.byData(ps.data);
+    const map = Object.fromEntries(pres.map((p) => [p.funcionario_id, p]));
+    host.innerHTML = funcs
+      .map((f) => {
+        const p = map[f.id];
+        const marca = p ? `<small class="muted">${p.hora ? p.hora.slice(0, 5) : ""}</small>` : "";
+        return `<div class="list-row">
+          <div><strong>${esc(f.nome)}</strong> ${marca}</div>
+          <div class="row gap" data-func="${f.id}">
+            <button class="btn small ${p?.status === "PRESENTE" ? "ok-active" : "ghost"}" data-st="PRESENTE">Presente</button>
+            <button class="btn small ${p?.status === "FALTA" ? "danger" : "ghost"}" data-st="FALTA">Falta</button>
+          </div>
+        </div>`;
+      })
+      .join("");
+    $$("[data-func]", host).forEach((wrap) => {
+      $$("[data-st]", wrap).forEach((b) => (b.onclick = async () => {
+        const hora = new Date().toTimeString().slice(0, 8);
+        await db.presenca.upsert({ data: ps.data, funcionario_id: wrap.dataset.func, status: b.dataset.st, hora });
+        toast("Presença registrada.");
+        renderMarcar();
+        renderHist();
+      }));
+    });
+  }
+
+  async function renderHist() {
+    const all = await db.presenca.list(300);
+    const list = ps.filtro ? all.filter((p) => p.funcionario_id === ps.filtro) : all;
+    // resumo por colaborador (presenças x faltas no período carregado)
+    const resumo = {};
+    all.forEach((p) => {
+      const n = p.funcionarios?.nome || "—";
+      resumo[n] = resumo[n] || { p: 0, f: 0 };
+      p.status === "PRESENTE" ? resumo[n].p++ : resumo[n].f++;
+    });
+    $("#histResumo").innerHTML = Object.entries(resumo)
+      .map(([n, r]) => `<span class="chip">${esc(n)}: <strong>${r.p}P</strong> · ${r.f}F</span>`)
+      .join("");
+    $("#histTabela").innerHTML = list.length
+      ? `<div class="table-wrap"><table>
+          <thead><tr><th>Data</th><th>Colaborador</th><th>Status</th><th>Hora</th></tr></thead>
+          <tbody>${list
+            .map(
+              (p) => `<tr>
+            <td>${dateBR(p.data)}</td>
+            <td>${esc(p.funcionarios?.nome || "—")}</td>
+            <td>${p.status === "PRESENTE" ? '<span class="tag ok">presente</span>' : '<span class="tag warn">falta</span>'}</td>
+            <td>${p.hora ? p.hora.slice(0, 5) : "—"}</td>
+          </tr>`
+            )
+            .join("")}</tbody></table></div>`
+      : `<div class="empty">Sem registros.</div>`;
+  }
+
+  $("#presData").onchange = (e) => { ps.data = e.target.value || today(); renderMarcar(); };
+  $("#presFiltro").onchange = (e) => { ps.filtro = e.target.value; renderHist(); };
+  renderMarcar();
+  renderHist();
 }
 
 // ============================================================ SERVIÇOS

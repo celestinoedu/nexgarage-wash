@@ -100,8 +100,13 @@ export const atendimentos = {
 export const financeiro = {
   list: (limit = 500) =>
     supabase.from("financeiro").select("*").order("data", { ascending: false }).limit(limit).then(ok),
+  byAtendimento: (id) =>
+    supabase.from("financeiro").select("*").eq("atendimento_id", id).eq("tipo", "ENTRADA").then(ok),
   create: (row) => supabase.from("financeiro").insert(row).select().single().then(ok),
+  update: (id, row) => supabase.from("financeiro").update(row).eq("id", id).select().single().then(ok),
   remove: (id) => supabase.from("financeiro").delete().eq("id", id).then(ok),
+  removeByAtendimento: (id) =>
+    supabase.from("financeiro").delete().eq("atendimento_id", id).eq("tipo", "ENTRADA").then(ok),
 };
 
 // ---- Presença --------------------------------------------------------------
