@@ -67,14 +67,23 @@ export async function renderNovoRegistro({ onSaved } = {}) {
         <div class="form">
           <label>Placa
             <div class="row gap">
-              <input id="placa" placeholder="ABC1D23" style="text-transform:uppercase"/>
+              <input id="placa" placeholder="ABC1D23 — busca automática" style="text-transform:uppercase" autocomplete="off"/>
               <button class="btn" id="buscar" type="button">Buscar</button>
             </div>
           </label>
           <div id="placaResult"></div>
         </div>`;
+      const inp = $("#placa", card);
       $("#buscar", card).onclick = buscarPlaca;
-      $("#placa", card).onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); buscarPlaca(); } };
+      inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); buscarPlaca(); } };
+      // busca automática ao digitar (a partir de 4 caracteres)
+      let deb;
+      inp.oninput = () => {
+        clearTimeout(deb);
+        const v = inp.value.trim();
+        if (v.length < 4) { $("#placaResult", card).innerHTML = ""; return; }
+        deb = setTimeout(buscarPlaca, 450);
+      };
     } else {
       const opts = parc.map((p) => `<option value="${p.id}">${esc(p.nome)}</option>`).join("");
       host.innerHTML = `
@@ -107,15 +116,36 @@ export async function renderNovoRegistro({ onSaved } = {}) {
     const res = $("#placaResult", card);
     if (found && found.length) {
       const c = found[0];
-      st.carro_id = c.id;
+      const cliente = c.clientes || {};
       st.cliente_id = c.cliente_id;
-      st.veiculo = c.veiculo || "";
-      st.base_antiga = !!c.clientes?.base_antiga;
+      st.base_antiga = !!cliente.base_antiga;
+      const selecionarCarro = (carro) => {
+        st.carro_id = carro.id;
+        st.veiculo = carro.veiculo || "";
+        st.placa = (carro.placa || "").toUpperCase();
+      };
+      selecionarCarro(c);
+      // busca todos os carros do cliente para permitir escolher o certo
+      const carros = await db.carros.byCliente(c.cliente_id);
+      const desenhaCarros = () =>
+        carros
+          .map((x) => `<button type="button" class="chip ${x.id === st.carro_id ? "active" : ""}" data-carro="${x.id}">
+            ${esc(x.placa)}${x.veiculo ? " · " + esc(x.veiculo) : ""}</button>`)
+          .join("");
       res.innerHTML = `<div class="found">
-        ✓ <strong>${esc(c.clientes?.nome || "Cliente")}</strong> — ${esc(c.veiculo || "")} (${esc(c.placa)})
-        ${c.clientes?.base_antiga ? '<span class="tag yuri">base antiga</span>' : ""}
-        <br><small class="muted">${esc(c.clientes?.telefone || "")}</small>
+        ✓ <strong>${esc(cliente.nome || "Cliente")}</strong>
+        ${cliente.base_antiga ? '<span class="tag yuri">base antiga</span>' : ""}
+        <br><small class="muted">${esc(cliente.telefone || "sem telefone")}</small>
+        ${carros.length > 1 ? `<div class="muted small" style="margin-top:8px">Carro do atendimento:</div>` : ""}
+        <div class="chips" id="carrosCli" style="margin-top:6px">${desenhaCarros()}</div>
       </div>`;
+      const wireCarros = () =>
+        $$("[data-carro]", res).forEach((b) => (b.onclick = () => {
+          selecionarCarro(carros.find((x) => x.id === b.dataset.carro));
+          $("#carrosCli", res).innerHTML = desenhaCarros();
+          wireCarros();
+        }));
+      wireCarros();
     } else {
       st.carro_id = null;
       st.cliente_id = null;
