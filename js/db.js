@@ -124,6 +124,17 @@ export const presenca = {
     supabase.from("presenca").upsert(row, { onConflict: "data,funcionario_id" }).select().single().then(ok),
 };
 
+// ---- Configurações (chave/valor) ------------------------------------------
+export const config = {
+  async get(chave, fallback = null) {
+    const { data, error } = await supabase.from("configuracoes").select("valor").eq("chave", chave).maybeSingle();
+    if (error) throw error;
+    return data ? data.valor : fallback;
+  },
+  set: (chave, valor) =>
+    supabase.from("configuracoes").upsert({ chave, valor: String(valor) }, { onConflict: "chave" }).then(ok),
+};
+
 // ---- Views -----------------------------------------------------------------
 export const views = {
   ultimaLavagem: () =>

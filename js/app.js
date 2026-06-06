@@ -133,22 +133,25 @@ async function viewDashboard() {
     db.views.ultimaLavagem(),
   ]);
   const hoje = today();
-  const mesAtual = hoje.slice(0, 7);
-  const doMes = ats.filter((a) => String(a.data).slice(0, 7) === mesAtual);
-  const carrosHoje = ats.filter((a) => String(a.data).slice(0, 10) === hoje).length;
-  const faturMes = doMes.reduce((s, a) => s + Number(a.valor || 0), 0);
-  const pendentes = ats.filter((a) => a.status_pg === "PENDENTE");
-  const pendValor = pendentes.reduce((s, a) => s + Number(a.valor || 0), 0);
+  const hojeAts = ats.filter((a) => String(a.data).slice(0, 10) === hoje);
+  const carrosHoje = hojeAts.length;
+  const faturHoje = hojeAts.reduce((s, a) => s + Number(a.valor || 0), 0);
+  const pendHoje = hojeAts.filter((a) => a.status_pg === "PENDENTE");
+  const receberHoje = pendHoje.reduce((s, a) => s + Number(a.valor || 0), 0);
 
   const opor = (oportRaw || []).filter((o) => o.dias_sem_lavar >= 15);
 
   $("#view").innerHTML = `
-    <div class="kpis">
+    <div class="kpis kpis-3">
       ${kpi("Carros hoje", carrosHoje)}
-      ${kpi("Carros no mês", doMes.length)}
-      ${kpi("Faturamento mês", money(faturMes))}
-      ${kpi("A receber", money(pendValor), `${pendentes.length} pendência(s)`)}
+      ${kpi("Faturamento hoje", money(faturHoje))}
+      ${kpi("A receber hoje", money(receberHoje), `${pendHoje.length} pendência(s)`)}
     </div>
+
+    ${card(`
+      <div class="card-head"><h3>🕒 Últimos atendimentos</h3></div>
+      ${tableAtend(ats.slice(0, 8))}
+    `)}
 
     ${card(`
       <div class="card-head"><h3>🎯 Oportunidades</h3><span class="badge">${opor.length}</span></div>
@@ -172,14 +175,14 @@ async function viewDashboard() {
             : `<div class="empty">Nenhuma oportunidade no momento 🎉</div>`
         }
       </div>
-    `)}
-
-    ${card(`
-      <div class="card-head"><h3>🕒 Últimos atendimentos</h3></div>
-      ${tableAtend(ats.slice(0, 8))}
     `)}`;
 
   bindAtendEdits(ats);
+}
+
+// Tag do rateio conforme a base do cliente (base antiga = 40/60, demais = 50/50).
+function splitTag(a) {
+  return a.base_antiga ? '<span class="tag yuri">40/60</span>' : '<span class="tag split50">50/50</span>';
 }
 
 function tableAtend(list) {
@@ -193,7 +196,7 @@ function tableAtend(list) {
           return `<tr>
             <td>${dateBR(a.data)}</td>
             <td>${esc(a.os_numero || "")}</td>
-            <td>${esc(quem || "—")} ${a.tipo === "PARCEIRO" ? '<span class="tag">parceiro</span>' : ""}</td>
+            <td>${esc(quem || "—")} ${a.tipo === "PARCEIRO" ? '<span class="tag">parceiro</span>' : ""} ${splitTag(a)}</td>
             <td>${esc(a.veiculo || "")}<br><small class="muted">${esc(a.placa || "")}</small></td>
             <td>${esc(a.servicos || "")}</td>
             <td class="r">${money(a.valor)}</td>
@@ -571,9 +574,21 @@ function formFunc(f = null) {
   };
 }
 
+// Chave de semana ISO (ano-Wnn) para agrupar faltas e descontar 1 domingo por semana.
+function isoWeekKey(dateStr) {
+  const d = new Date(String(dateStr).slice(0, 10) + "T12:00:00");
+  const t = new Date(d);
+  t.setDate(t.getDate() + 3 - ((d.getDay() + 6) % 7));
+  const week1 = new Date(t.getFullYear(), 0, 4);
+  const wk = 1 + Math.round(((t - week1) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
+  return t.getFullYear() + "-W" + String(wk).padStart(2, "0");
+}
+
 // ============================================================ PRESENÇA
 async function viewPresenca() {
-  const funcs = (await db.funcionarios.list()).filter((f) => f.ativo !== false);
+  const [funcsAll, resetStr] = await Promise.all([db.funcionarios.list(), db.config.get("presenca_reset", "")]);
+  const funcs = funcsAll.filter((f) => f.ativo !== false);
+  const reset = resetStr || "";
   const ps = { data: today(), filtro: "" };
 
   $("#view").innerHTML = `
@@ -584,16 +599,33 @@ async function viewPresenca() {
       </div>
       <div id="marcar" class="list"></div>
     </div>
+
     <div class="card">
-      <div class="card-head"><h3>Histórico</h3>
+      <div class="card-head"><h3>Contagem / Acerto</h3>
+        <button class="btn small danger" id="zerar">Zerar contador</button></div>
+      <p class="muted small">Contando ${reset ? `desde <strong>${dateBR(reset)}</strong>` : "<strong>desde o início</strong>"}.
+        Uma falta na semana desconta 1 domingo (DSR). Os registros não são apagados ao zerar.</p>
+      <div id="dsrAlert"></div>
+      <div id="contagem"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Histórico completo</h3>
         <select id="presFiltro" class="mini">
           <option value="">Todos os colaboradores</option>
           ${funcs.map((f) => `<option value="${f.id}">${esc(f.nome)}</option>`).join("")}
         </select>
       </div>
-      <div id="histResumo" class="chips" style="margin-bottom:12px"></div>
       <div id="histTabela"></div>
     </div>`;
+
+  $("#zerar").onclick = async () => {
+    if (await confirmDialog("Zerar o contador a partir de hoje? Os registros NÃO serão apagados — apenas a contagem recomeça.")) {
+      await db.config.set("presenca_reset", today());
+      toast("Contador zerado. Nova contagem iniciada.");
+      route();
+    }
+  };
 
   async function renderMarcar() {
     const host = $("#marcar");
@@ -625,18 +657,39 @@ async function viewPresenca() {
   }
 
   async function renderHist() {
-    const all = await db.presenca.list(300);
-    const list = ps.filtro ? all.filter((p) => p.funcionario_id === ps.filtro) : all;
-    // resumo por colaborador (presenças x faltas no período carregado)
+    const all = await db.presenca.list(500);
+
+    // CONTAGEM (desde o reset) com desconto de domingo por semana com falta
+    const naContagem = all.filter((p) => !reset || String(p.data).slice(0, 10) >= reset);
     const resumo = {};
-    all.forEach((p) => {
+    naContagem.forEach((p) => {
       const n = p.funcionarios?.nome || "—";
-      resumo[n] = resumo[n] || { p: 0, f: 0 };
-      p.status === "PRESENTE" ? resumo[n].p++ : resumo[n].f++;
+      resumo[n] = resumo[n] || { p: 0, f: 0, semanasFalta: new Set() };
+      if (p.status === "PRESENTE") resumo[n].p++;
+      else { resumo[n].f++; resumo[n].semanasFalta.add(isoWeekKey(p.data)); }
     });
-    $("#histResumo").innerHTML = Object.entries(resumo)
-      .map(([n, r]) => `<span class="chip">${esc(n)}: <strong>${r.p}P</strong> · ${r.f}F</span>`)
-      .join("");
+    const linhas = Object.entries(resumo).map(([n, r]) => {
+      const dom = r.semanasFalta.size; // 1 domingo descontado por semana com falta
+      return { n, p: r.p, f: r.f, dom };
+    });
+    const totalDom = linhas.reduce((s, l) => s + l.dom, 0);
+
+    $("#dsrAlert").innerHTML = totalDom
+      ? `<div class="alert">⚠️ Desconto de DSR: ${linhas.filter((l) => l.dom).map((l) => `<strong>${esc(l.n)}</strong> −${l.dom} domingo${l.dom > 1 ? "s" : ""}`).join(" · ")}</div>`
+      : "";
+    $("#contagem").innerHTML = linhas.length
+      ? `<div class="table-wrap"><table>
+          <thead><tr><th>Colaborador</th><th class="r">Presenças</th><th class="r">Faltas</th><th class="r">Domingos descontados</th></tr></thead>
+          <tbody>${linhas
+            .map((l) => `<tr><td><strong>${esc(l.n)}</strong></td>
+              <td class="r">${l.p}</td>
+              <td class="r">${l.f ? `<span class="warn-txt">${l.f}</span>` : 0}</td>
+              <td class="r">${l.dom ? `<span class="tag warn">−${l.dom} dom.</span>` : "—"}</td></tr>`)
+            .join("")}</tbody></table></div>`
+      : `<div class="empty small">Nenhum registro na contagem atual.</div>`;
+
+    // HISTÓRICO COMPLETO (todos os registros, com filtro)
+    const list = ps.filtro ? all.filter((p) => p.funcionario_id === ps.filtro) : all;
     $("#histTabela").innerHTML = list.length
       ? `<div class="table-wrap"><table>
           <thead><tr><th>Data</th><th>Colaborador</th><th>Status</th><th>Hora</th></tr></thead>
@@ -700,49 +753,107 @@ function formServico(s = null) {
 }
 
 // ============================================================ FINANCEIRO
+const formaKey = (f) => {
+  const k = norm(f);
+  if (k.includes("DINHEIRO")) return "DINHEIRO";
+  if (k.includes("CART")) return "CARTAO";
+  if (k.includes("PIX")) return "PIX";
+  return "OUTRO";
+};
+
+// Calcula o rateio do mês aplicando o % da empresa por cima e dividindo o resto.
+function calcRateio(entradasList, pct) {
+  const base = entradasList.filter((l) => l.base_antiga).reduce((s, l) => s + Number(l.valor || 0), 0);
+  const comum = entradasList.filter((l) => !l.base_antiga).reduce((s, l) => s + Number(l.valor || 0), 0);
+  const total = base + comum;
+  const empresa = total * pct;
+  const restoBase = base * (1 - pct);
+  const restoComum = comum * (1 - pct);
+  return {
+    base, comum, total, empresa,
+    rennan: restoBase * 0.40 + restoComum * 0.50,
+    yuri: restoBase * 0.60 + restoComum * 0.50,
+  };
+}
+
 async function viewFinanceiro() {
-  const [list, rateio] = await Promise.all([db.financeiro.list(500), db.views.rateio()]);
+  const [list, ats, pctStr] = await Promise.all([
+    db.financeiro.list(1000),
+    db.atendimentos.list(1000),
+    db.config.get("empresa_pct", "0"),
+  ]);
   const mes = today().slice(0, 7);
   const doMes = list.filter((l) => String(l.data).slice(0, 7) === mes);
-  const entradas = doMes.filter((l) => l.tipo === "ENTRADA").reduce((s, l) => s + Number(l.valor || 0), 0);
+  const entradasMes = doMes.filter((l) => l.tipo === "ENTRADA");
+  const entradas = entradasMes.reduce((s, l) => s + Number(l.valor || 0), 0);
   const saidas = doMes.filter((l) => l.tipo === "SAIDA").reduce((s, l) => s + Number(l.valor || 0), 0);
-  const totalEnt = list.filter((l) => l.tipo === "ENTRADA").reduce((s, l) => s + Number(l.valor || 0), 0);
+
+  // Caixa acumulado + discriminação das entradas por forma de pagamento
+  const entAll = list.filter((l) => l.tipo === "ENTRADA");
+  const totalEnt = entAll.reduce((s, l) => s + Number(l.valor || 0), 0);
   const totalSai = list.filter((l) => l.tipo === "SAIDA").reduce((s, l) => s + Number(l.valor || 0), 0);
-  const r = (rateio || []).find((x) => String(x.mes).slice(0, 7) === mes) || {};
+  const caixa = totalEnt - totalSai;
+  const porForma = { DINHEIRO: 0, CARTAO: 0, PIX: 0, OUTRO: 0 };
+  entAll.forEach((l) => (porForma[formaKey(l.forma_pgto)] += Number(l.valor || 0)));
+
+  // Total pendente (a receber) = atendimentos ainda não pagos
+  const pendentesAts = ats.filter((a) => a.status_pg === "PENDENTE");
+  const totalPendente = pendentesAts.reduce((s, a) => s + Number(a.valor || 0), 0);
+
+  const pct = Number(pctStr || 0) / 100;
+  const r = calcRateio(entradasMes, pct);
 
   $("#view").innerHTML = `
     <div class="kpis">
       ${kpi("Entradas (mês)", money(entradas))}
       ${kpi("Saídas (mês)", money(saidas))}
-      ${kpi("Resultado (mês)", money(entradas - saidas))}
-      ${kpi("Caixa (acum.)", money(totalEnt - totalSai))}
+      ${kpi("Total em caixa", money(caixa), "recebido − saídas (acum.)")}
+      ${kpi("Total pendente", money(totalPendente), `${pendentesAts.length} a receber`)}
     </div>
+
     <div class="grid-2">
       ${card(`
-        <div class="card-head"><h3>👥 Distribuição de lucro (mês)</h3></div>
-        <p class="muted small">Sobre as entradas. Base antiga: Rennan 40% / Yuri 60%. Demais: 50% / 50%.</p>
-        <div class="split">
-          <div class="split-box"><span>Rennan</span><strong>${money(r.rennan)}</strong></div>
-          <div class="split-box"><span>Yuri</span><strong>${money(r.yuri)}</strong></div>
-        </div>`)}
-      ${card(`
-        <div class="card-head"><h3>Lançar</h3></div>
-        <div class="row gap">
+        <div class="card-head"><h3>💵 Caixa discriminado (acum.)</h3></div>
+        <div class="list">
+          <div class="list-row"><span class="muted">Dinheiro</span><strong>${money(porForma.DINHEIRO)}</strong></div>
+          <div class="list-row"><span class="muted">Cartão</span><strong>${money(porForma.CARTAO)}</strong></div>
+          <div class="list-row"><span class="muted">PIX</span><strong>${money(porForma.PIX)}</strong></div>
+          ${porForma.OUTRO ? `<div class="list-row"><span class="muted">Outros</span><strong>${money(porForma.OUTRO)}</strong></div>` : ""}
+          <div class="list-row"><span class="muted">(−) Saídas</span><strong class="warn-txt">${money(totalSai)}</strong></div>
+          <div class="list-row"><span>Total em caixa</span><strong>${money(caixa)}</strong></div>
+        </div>
+        <div class="row gap" style="margin-top:12px">
           <button class="btn ok block" id="addEnt">+ Entrada</button>
           <button class="btn danger block" id="addSai">+ Saída</button>
         </div>`)}
+
+      ${card(`
+        <div class="card-head"><h3>👥 Distribuição de lucro (mês)</h3>
+          <button class="btn small" id="relYuri">📄 Relatório p/ Yuri</button></div>
+        <p class="muted small">A empresa fica com a % definida; o restante é Rennan 40% / Yuri 60% (base antiga) ou 50% / 50% (demais).</p>
+        <div class="row gap" style="align-items:flex-end;margin-bottom:12px">
+          <label style="flex:0 0 140px">% da empresa
+            <input id="empresaPct" type="number" min="0" max="100" step="1" value="${esc(pctStr || 0)}"/></label>
+          <button class="btn primary" id="salvarPct">Salvar %</button>
+        </div>
+        <div class="split split-3">
+          <div class="split-box"><span>Empresa (${esc(pctStr || 0)}%)</span><strong>${money(r.empresa)}</strong></div>
+          <div class="split-box"><span>Rennan</span><strong>${money(r.rennan)}</strong></div>
+          <div class="split-box"><span>Yuri</span><strong>${money(r.yuri)}</strong></div>
+        </div>`)}
     </div>
+
     ${card(`
       <div class="card-head"><h3>Lançamentos</h3></div>
       <div class="table-wrap"><table>
         <thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th class="r">Valor</th><th>Forma</th><th></th></tr></thead>
         <tbody>${list
-          .slice(0, 100)
+          .slice(0, 150)
           .map(
             (l) => `<tr>
           <td>${dateBR(l.data)}</td>
           <td>${l.tipo === "ENTRADA" ? '<span class="tag ok">entrada</span>' : '<span class="tag warn">saída</span>'}</td>
-          <td>${esc(l.descricao || "")} ${l.base_antiga ? '<span class="tag yuri">yuri</span>' : ""}</td>
+          <td>${esc(l.descricao || "")} ${l.base_antiga ? '<span class="tag yuri">40/60</span>' : ""}</td>
           <td class="r">${money(l.valor)}</td>
           <td>${esc(l.forma_pgto || "")}</td>
           <td class="r"><button class="btn small ghost" data-del="${l.id}">✕</button></td>
@@ -753,9 +864,62 @@ async function viewFinanceiro() {
 
   $("#addEnt").onclick = () => formFinanceiro("ENTRADA");
   $("#addSai").onclick = () => formFinanceiro("SAIDA");
+  $("#salvarPct").onclick = async () => {
+    const v = Math.max(0, Math.min(100, Number($("#empresaPct").value || 0)));
+    await db.config.set("empresa_pct", v);
+    toast("% da empresa salva."); route();
+  };
+  $("#relYuri").onclick = () => relatorioYuri(mes, entradasMes, r, pctStr || 0);
   $$("[data-del]").forEach((b) => (b.onclick = async () => {
     if (await confirmDialog("Excluir lançamento?")) { await db.financeiro.remove(b.dataset.del); toast("Excluído."); route(); }
   }));
+}
+
+// Abre uma janela imprimível com o fechamento do mês para o Yuri.
+function relatorioYuri(mes, entradas, r, pct) {
+  const linhas = entradas
+    .slice()
+    .sort((a, b) => String(a.data).localeCompare(String(b.data)))
+    .map(
+      (l) => `<tr><td>${dateBR(l.data)}</td><td>${esc(l.descricao || "")}</td>
+        <td style="text-align:center">${l.base_antiga ? "40/60" : "50/50"}</td>
+        <td style="text-align:right">${money(l.valor)}</td></tr>`
+    )
+    .join("");
+  const [a, m] = mes.split("-");
+  const w = window.open("", "_blank", "width=820,height=900");
+  w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"/>
+    <title>Relatório ${m}/${a} — Top Line</title>
+    <style>
+      body{font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;color:#111;padding:32px;max-width:760px;margin:auto}
+      h1{font-size:20px;margin:0} h2{font-size:15px;margin:24px 0 8px}
+      .muted{color:#666} table{width:100%;border-collapse:collapse;margin-top:8px}
+      th,td{padding:7px 8px;border-bottom:1px solid #ddd;font-size:13px} th{text-align:left;background:#f4f6fa}
+      .boxes{display:flex;gap:12px;margin-top:10px} .box{flex:1;border:1px solid #ddd;border-radius:10px;padding:14px}
+      .box span{color:#666;font-size:12px;display:block} .box strong{font-size:18px}
+      .tot{text-align:right} .foot{margin-top:28px;color:#888;font-size:12px}
+      @media print{button{display:none}}
+    </style></head><body>
+    <h1>Top Line Higienizações — Fechamento ${m}/${a}</h1>
+    <p class="muted">Distribuição de lucro sobre as entradas do mês. Gerado em ${dateBR(today())}.</p>
+    <div class="boxes">
+      <div class="box"><span>Total de entradas</span><strong>${money(r.total)}</strong></div>
+      <div class="box"><span>Empresa (${pct}%)</span><strong>${money(r.empresa)}</strong></div>
+      <div class="box"><span>Rennan</span><strong>${money(r.rennan)}</strong></div>
+      <div class="box"><span>Yuri</span><strong>${money(r.yuri)}</strong></div>
+    </div>
+    <h2>Composição</h2>
+    <table><tbody>
+      <tr><td>Entradas base antiga (40/60)</td><td class="tot">${money(r.base)}</td></tr>
+      <tr><td>Entradas demais (50/50)</td><td class="tot">${money(r.comum)}</td></tr>
+    </tbody></table>
+    <h2>Entradas do mês (${entradas.length})</h2>
+    <table><thead><tr><th>Data</th><th>Descrição</th><th style="text-align:center">Divisão</th><th class="tot">Valor</th></tr></thead>
+      <tbody>${linhas || '<tr><td colspan="4" class="muted">Sem entradas no mês.</td></tr>'}</tbody></table>
+    <p class="foot">Gerado pelo sistema Top Line Higienizações.</p>
+    <button onclick="window.print()" style="margin-top:20px;padding:10px 18px;border:none;border-radius:8px;background:#2f7cff;color:#fff;font-weight:600;cursor:pointer">Imprimir / Salvar PDF</button>
+    </body></html>`);
+  w.document.close();
 }
 
 function formFinanceiro(tipo) {
