@@ -656,6 +656,44 @@ async function viewPresenca() {
     });
   }
 
+  function editPresenca(p) {
+    const opts = funcsAll
+      .map((f) => `<option value="${f.id}" ${p.funcionario_id === f.id ? "selected" : ""}>${esc(f.nome)}</option>`)
+      .join("");
+    const { close } = openModal("Editar registro", `
+      <form id="f" class="form">
+        <label>Data<input name="data" type="date" value="${esc(String(p.data).slice(0, 10))}" required /></label>
+        <label>Colaborador
+          <select name="funcionario_id" required>${opts}</select>
+        </label>
+        <label>Status
+          <select name="status">
+            <option value="PRESENTE" ${p.status === "PRESENTE" ? "selected" : ""}>Presente</option>
+            <option value="FALTA" ${p.status === "FALTA" ? "selected" : ""}>Falta</option>
+          </select>
+        </label>
+        <label>Hora<input name="hora" type="time" value="${esc(p.hora ? p.hora.slice(0, 5) : "")}" /></label>
+        <div class="row gap end">
+          <button class="btn primary" type="submit">Salvar</button>
+        </div>
+      </form>`);
+
+    $("#f").onsubmit = async (e) => {
+      e.preventDefault();
+      const d = formData(e.target);
+      d.hora = d.hora ? `${d.hora}:00` : null;
+      try {
+        await db.presenca.update(p.id, d);
+        toast("Registro atualizado.");
+        close();
+        renderMarcar();
+        renderHist();
+      } catch (err) {
+        toast(err.message || "Erro ao atualizar.", "err");
+      }
+    };
+  }
+
   async function renderHist() {
     const all = await db.presenca.list(500);
 
@@ -692,7 +730,7 @@ async function viewPresenca() {
     const list = ps.filtro ? all.filter((p) => p.funcionario_id === ps.filtro) : all;
     $("#histTabela").innerHTML = list.length
       ? `<div class="table-wrap"><table>
-          <thead><tr><th>Data</th><th>Colaborador</th><th>Status</th><th>Hora</th></tr></thead>
+          <thead><tr><th>Data</th><th>Colaborador</th><th>Status</th><th>Hora</th><th></th></tr></thead>
           <tbody>${list
             .map(
               (p) => `<tr>
@@ -700,10 +738,12 @@ async function viewPresenca() {
             <td>${esc(p.funcionarios?.nome || "—")}</td>
             <td>${p.status === "PRESENTE" ? '<span class="tag ok">presente</span>' : '<span class="tag warn">falta</span>'}</td>
             <td>${p.hora ? p.hora.slice(0, 5) : "—"}</td>
+            <td class="r"><button class="btn small ghost" data-edit-pres="${p.id}">Editar</button></td>
           </tr>`
             )
             .join("")}</tbody></table></div>`
       : `<div class="empty">Sem registros.</div>`;
+    $$("[data-edit-pres]").forEach((b) => (b.onclick = () => editPresenca(list.find((p) => p.id === b.dataset.editPres))));
   }
 
   $("#presData").onchange = (e) => { ps.data = e.target.value || today(); renderMarcar(); };

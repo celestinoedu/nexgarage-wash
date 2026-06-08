@@ -122,6 +122,7 @@ export const presenca = {
       .then(ok),
   upsert: (row) =>
     supabase.from("presenca").upsert(row, { onConflict: "data,funcionario_id" }).select().single().then(ok),
+  update: (id, row) => supabase.from("presenca").update(row).eq("id", id).select().single().then(ok),
 };
 
 // ---- Configurações (chave/valor) ------------------------------------------
