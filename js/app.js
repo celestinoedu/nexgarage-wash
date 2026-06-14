@@ -15,6 +15,16 @@ const MENU = [
 
 const state = { session: null };
 
+const APP_VERSION = "1.1.0";
+
+// Rodapé com dados da desenvolvedora + versão.
+function footerHTML() {
+  return `<footer class="app-footer">
+    Desenvolvido por <strong>LOTUS NEGÓCIOS LTDA</strong> · CNPJ 45.537.878/0001-07
+    <span class="sep">·</span> v${APP_VERSION}
+  </footer>`;
+}
+
 // ============================================================ BOOTSTRAP
 async function boot() {
   if (!db.isConfigured) return renderSetup();
@@ -35,6 +45,7 @@ function renderSetup() {
         <p class="muted">Preencha <code>app/config.js</code> com a URL e a anon key do seu projeto
         Supabase. Veja o <strong>README</strong> para o passo a passo (2 minutos).</p>
       </div>
+      ${footerHTML()}
     </div>`;
 }
 
@@ -49,6 +60,7 @@ function renderLogin() {
         <button class="btn primary block" type="submit">Entrar</button>
         <p class="err" id="loginErr"></p>
       </form>
+      ${footerHTML()}
     </div>`;
   $("#loginForm").onsubmit = async (e) => {
     e.preventDefault();
@@ -74,6 +86,7 @@ function renderShell() {
           <button class="btn primary" id="novoBtn">+ Novo Registro</button>
         </header>
         <section id="view" class="view"></section>
+        ${footerHTML()}
       </main>
     </div>`;
 

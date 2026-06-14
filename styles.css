@@ -69,6 +69,9 @@ hr { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
 .view { padding: 20px; max-width: 1200px; }
 .only-mobile { display: none; }
 .backdrop-nav { display: none; }
+.app-footer { padding: 18px 20px 28px; text-align: center; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); margin-top: 10px; }
+.app-footer .sep { margin: 0 6px; opacity: .6; }
+.auth .app-footer { border: none; margin-top: 18px; }
 
 /* ---------- BUTTONS ---------- */
 .btn {
