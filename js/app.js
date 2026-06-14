@@ -35,12 +35,11 @@ function applyTheme(t) {
 }
 function toggleTheme() {
   applyTheme(currentTheme() === "dark" ? "light" : "dark");
-  const btn = $("#themeToggle");
-  if (btn) btn.innerHTML = themeBtnLabel();
 }
-function themeBtnLabel() {
-  return currentTheme() === "dark" ? "☀️ Tema claro" : "🌙 Tema escuro";
-}
+const themeSwitchHTML = () =>
+  `<button class="theme-switch" id="themeToggle" role="switch" aria-label="Alternar tema" title="Alternar tema claro/escuro">
+    <span class="ts-ico">☀️</span><span class="ts-ico">🌙</span><span class="ts-thumb"></span>
+  </button>`;
 
 // ============================================================ BOOTSTRAP
 async function boot() {
@@ -94,9 +93,13 @@ function renderShell() {
       <aside class="sidebar" id="sidebar">
         <img class="brand-logo side" src="assets/logo.png" alt="Top Line Higienizações" />
         <nav id="nav"></nav>
-        <button class="btn ghost block theme-toggle" id="themeToggle">${themeBtnLabel()}</button>
-        <button class="btn ghost block" id="logout">Sair</button>
-        <div class="sidebar-footer">LOTUS NEGÓCIOS LTDA<br>CNPJ 45.537.878/0001-07 · v${APP_VERSION}</div>
+        <div class="sidebar-bottom">
+          <div class="row between" style="align-items:center;gap:10px">
+            <button class="btn ghost" id="logout">Sair</button>
+            ${themeSwitchHTML()}
+          </div>
+          <div class="sidebar-footer">LOTUS NEGÓCIOS LTDA<br>CNPJ 45.537.878/0001-07 · v${APP_VERSION}</div>
+        </div>
       </aside>
       <div class="backdrop-nav" id="navBackdrop"></div>
       <main class="main">

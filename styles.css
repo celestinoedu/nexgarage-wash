@@ -63,7 +63,8 @@ hr { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
 .shell { display: grid; grid-template-columns: 240px 1fr; min-height: 100dvh; }
 .sidebar {
   background: var(--panel); border-right: 1px solid var(--line);
-  padding: 18px 14px; display: flex; flex-direction: column; gap: 6px; position: sticky; top: 0; height: 100dvh;
+  padding: 18px 14px; display: flex; flex-direction: column; gap: 6px; position: sticky; top: 0;
+  height: 100dvh; overflow-y: auto;
 }
 .sidebar .brand { padding: 6px 10px 14px; }
 #nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
@@ -74,8 +75,21 @@ hr { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
 .nav-item span { width: 22px; text-align: center; }
 .nav-item:hover { background: var(--panel-2); color: var(--txt); }
 .nav-item.active { background: var(--primary); color: #fff; }
-.theme-toggle { margin-top: 4px; font-size: 13px; }
+.sidebar-bottom { margin-top: 8px; flex-shrink: 0; }
 .sidebar-footer { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; line-height: 1.5; text-align: center; }
+/* toggle de tema (chave deslizante sol/lua) */
+.theme-switch {
+  position: relative; flex: 0 0 auto; width: 54px; height: 26px; border-radius: 999px;
+  background: var(--panel-2); border: 1px solid var(--line); cursor: pointer; padding: 0;
+  display: flex; align-items: center; justify-content: space-between; padding: 0 6px;
+}
+.theme-switch .ts-ico { font-size: 12px; line-height: 1; z-index: 1; }
+.theme-switch .ts-thumb {
+  position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--primary); transition: left .2s ease;
+}
+html[data-theme="dark"] .theme-switch .ts-thumb { left: 30px; }
+html[data-theme="light"] .theme-switch .ts-thumb { left: 2px; }
 .main { min-width: 0; }
 .topbar {
   display: flex; align-items: center; gap: 12px; padding: 14px 20px;
