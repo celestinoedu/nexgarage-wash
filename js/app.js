@@ -25,8 +25,26 @@ function footerHTML() {
   </footer>`;
 }
 
+// ============================================================ TEMA
+function currentTheme() {
+  return localStorage.getItem("tl_theme") || "dark";
+}
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  localStorage.setItem("tl_theme", t);
+}
+function toggleTheme() {
+  applyTheme(currentTheme() === "dark" ? "light" : "dark");
+  const btn = $("#themeToggle");
+  if (btn) btn.innerHTML = themeBtnLabel();
+}
+function themeBtnLabel() {
+  return currentTheme() === "dark" ? "☀️ Tema claro" : "🌙 Tema escuro";
+}
+
 // ============================================================ BOOTSTRAP
 async function boot() {
+  applyTheme(currentTheme());
   if (!db.isConfigured) return renderSetup();
   state.session = await db.auth.session();
   db.auth.onChange((s) => {
@@ -74,9 +92,11 @@ function renderShell() {
   $("#app").innerHTML = `
     <div class="shell">
       <aside class="sidebar" id="sidebar">
-        <img class="brand-logo side" src="assets/logo.png" alt="NexGarage" />
+        <img class="brand-logo side" src="assets/logo.png" alt="Top Line Higienizações" />
         <nav id="nav"></nav>
+        <button class="btn ghost block theme-toggle" id="themeToggle">${themeBtnLabel()}</button>
         <button class="btn ghost block" id="logout">Sair</button>
+        <div class="sidebar-footer">LOTUS NEGÓCIOS LTDA<br>CNPJ 45.537.878/0001-07 · v${APP_VERSION}</div>
       </aside>
       <div class="backdrop-nav" id="navBackdrop"></div>
       <main class="main">
@@ -94,6 +114,7 @@ function renderShell() {
     ([id, ic, label]) => `<button class="nav-item" data-route="${id}"><span>${ic}</span>${label}</button>`
   ).join("");
 
+  $("#themeToggle").onclick = toggleTheme;
   $("#logout").onclick = () => db.auth.signOut();
   $("#novoBtn").onclick = () => renderNovoRegistro({ onSaved: () => route() });
   $("#menuBtn").onclick = () => document.body.classList.toggle("nav-open");
@@ -139,6 +160,29 @@ const kpi = (label, value, hint = "") =>
     hint ? `<small>${esc(hint)}</small>` : ""
   }</div>`;
 
+// Card recolhível (minimizar). O estado fica salvo por chave no localStorage.
+const isCollapsed = (key) => localStorage.getItem("tl_collapse_" + key) === "1";
+const collapsibleCard = (key, titleHTML, bodyHTML) => {
+  const col = isCollapsed(key);
+  return `<div class="card collapsible ${col ? "collapsed" : ""}" data-collapse="${key}">
+    <div class="card-head collapse-head">
+      <div class="row gap" style="align-items:center">${titleHTML}</div>
+      <button class="icon-btn collapse-btn" title="Minimizar/expandir">${col ? "▸" : "▾"}</button>
+    </div>
+    <div class="collapsible-body">${bodyHTML}</div>
+  </div>`;
+};
+function bindCollapsibles(root = document) {
+  $$("[data-collapse]", root).forEach((cardEl) => {
+    const key = cardEl.dataset.collapse;
+    cardEl.querySelector(".collapse-head").onclick = () => {
+      const col = cardEl.classList.toggle("collapsed");
+      localStorage.setItem("tl_collapse_" + key, col ? "1" : "0");
+      cardEl.querySelector(".collapse-btn").textContent = col ? "▸" : "▾";
+    };
+  });
+}
+
 // ============================================================ DASHBOARD
 async function viewDashboard() {
   const [ats, oportRaw] = await Promise.all([
@@ -161,13 +205,9 @@ async function viewDashboard() {
       ${kpi("A receber hoje", money(receberHoje), `${pendHoje.length} pendência(s)`)}
     </div>
 
-    ${card(`
-      <div class="card-head"><h3>🕒 Últimos atendimentos</h3></div>
-      ${tableAtend(ats.slice(0, 8))}
-    `)}
+    ${collapsibleCard("ultimos", `<h3>🕒 Últimos atendimentos</h3>`, tableAtend(ats.slice(0, 8)))}
 
-    ${card(`
-      <div class="card-head"><h3>🎯 Oportunidades</h3><span class="badge">${opor.length}</span></div>
+    ${collapsibleCard("oportunidades", `<h3>🎯 Oportunidades</h3><span class="badge">${opor.length}</span>`, `
       <p class="muted small">Clientes há 15+ dias sem lavar — hora de chamar de volta.</p>
       <div class="list opor-grid">
         ${
@@ -191,6 +231,7 @@ async function viewDashboard() {
     `)}`;
 
   bindAtendEdits(ats);
+  bindCollapsibles();
 }
 
 // Tag do rateio conforme a base do cliente (base antiga = 40/60, demais = 50/50).

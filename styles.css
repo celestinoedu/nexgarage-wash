@@ -13,7 +13,22 @@
   --yuri: #a855f7;
   --radius: 14px;
   --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --topbar-bg: rgba(11, 18, 32, 0.85);
 }
+html[data-theme="light"] {
+  --bg: #eef1f6;
+  --panel: #ffffff;
+  --panel-2: #f1f4f9;
+  --line: #d8dee9;
+  --txt: #18233a;
+  --muted: #5d6b85;
+  --primary: #2f7cff;
+  --primary-2: #1f63d6;
+  --shadow: 0 8px 24px rgba(20, 30, 60, 0.12);
+  --topbar-bg: rgba(255, 255, 255, 0.85);
+}
+/* logo branco da Top Line precisa de fundo escuro também no tema claro */
+html[data-theme="light"] .brand-logo { background: #0e1f3d; border-radius: 12px; padding: 14px; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
 body {
@@ -59,10 +74,12 @@ hr { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
 .nav-item span { width: 22px; text-align: center; }
 .nav-item:hover { background: var(--panel-2); color: var(--txt); }
 .nav-item.active { background: var(--primary); color: #fff; }
+.theme-toggle { margin-top: 4px; font-size: 13px; }
+.sidebar-footer { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; line-height: 1.5; text-align: center; }
 .main { min-width: 0; }
 .topbar {
   display: flex; align-items: center; gap: 12px; padding: 14px 20px;
-  border-bottom: 1px solid var(--line); position: sticky; top: 0; background: rgba(11,18,32,.85);
+  border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--topbar-bg);
   backdrop-filter: blur(8px); z-index: 5;
 }
 .topbar h1 { font-size: 18px; flex: 1; }
@@ -111,6 +128,10 @@ textarea { min-height: 60px; resize: vertical; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin-bottom: 16px; }
 .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 10px; }
 .card-head h3 { font-size: 16px; }
+.collapse-head { cursor: pointer; user-select: none; margin-bottom: 0; }
+.card.collapsible .collapsible-body { margin-top: 10px; }
+.card.collapsible.collapsed .collapsible-body { display: none; }
+.collapse-btn { font-size: 16px; line-height: 1; color: var(--muted); }
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
 .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: grid; gap: 4px; }
 .kpi-label { color: var(--muted); font-size: 13px; }
