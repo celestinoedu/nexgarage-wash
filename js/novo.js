@@ -92,18 +92,28 @@ export async function renderNovoRegistro({ onSaved } = {}) {
             <select id="parceiro"><option value="">Selecione…</option>${opts}<option value="__novo">+ Novo parceiro…</option></select></label>
           <label>Veículo<input id="pveiculo" placeholder="Onix, Palio…"/></label>
           <label>Placa (opcional)<input id="pplaca" style="text-transform:uppercase"/></label>
-        </div>`;
+        </div>
+        <div id="parcInfo" class="muted small"></div>`;
+      const atualizaParc = (id) => {
+        const p = parc.find((x) => x.id === id);
+        st.parceiro_id = id || null;
+        st.base_antiga = !!p?.base_antiga;
+        $("#parcInfo", card).innerHTML = p
+          ? `Divisão: ${p.base_antiga ? '<span class="tag yuri">base antiga · 40/60</span>' : '<span class="tag split50">50/50</span>'}`
+          : "";
+      };
       $("#parceiro", card).onchange = async (e) => {
         if (e.target.value === "__novo") {
           const nome = prompt("Nome do novo parceiro:");
           if (nome) {
-            const p = await db.parceiros.create({ nome });
+            const base = confirm("Esse parceiro é da BASE ANTIGA (Yuri 40/60)?\n\nOK = base antiga · Cancelar = 50/50");
+            const p = await db.parceiros.create({ nome, base_antiga: base });
             parc.push(p);
             renderQuem();
             $("#parceiro", card).value = p.id;
-            st.parceiro_id = p.id;
+            atualizaParc(p.id);
           } else { e.target.value = ""; }
-        } else { st.parceiro_id = e.target.value || null; }
+        } else { atualizaParc(e.target.value); }
       };
     }
   }
@@ -275,7 +285,7 @@ export async function renderNovoRegistro({ onSaved } = {}) {
         if (!st.parceiro_id) return toast("Selecione o parceiro.", "err");
         st.veiculo = $("#pveiculo", card)?.value.trim() || "";
         st.placa = $("#pplaca", card)?.value.trim().toUpperCase() || "";
-        st.base_antiga = false;
+        // st.base_antiga já vem do parceiro selecionado (atualizaParc)
       }
 
       if (!st.itens.length) return toast("Adicione ao menos um serviço.", "err");

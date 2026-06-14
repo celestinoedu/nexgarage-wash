@@ -472,6 +472,7 @@ async function viewParceiros() {
         return `<div class="card">
           <div class="card-head"><h3>${esc(p.nome)}</h3>
             <button class="btn small ghost" data-edit="${p.id}">Editar</button></div>
+          <div style="margin-bottom:8px">${p.base_antiga ? '<span class="tag yuri">base antiga · 40/60</span>' : '<span class="tag split50">50/50</span>'}</div>
           <div class="list">
             <div class="list-row"><span class="muted">Serviços</span><strong>${s.n}</strong></div>
             <div class="list-row"><span class="muted">Total</span><strong>${money(s.total)}</strong></div>
@@ -491,6 +492,8 @@ function formParceiro(p = null) {
     <form id="f" class="form">
       <label>Nome<input name="nome" required value="${esc(p?.nome || "")}" /></label>
       <label>Telefone<input name="telefone" value="${esc(p?.telefone || "")}" /></label>
+      <label class="check"><input type="checkbox" name="base_antiga" ${p?.base_antiga ? "checked" : ""}/>
+        Parceiro da base antiga (tag Yuri → Rennan 40% / Yuri 60%)</label>
       <label>Observações<textarea name="observacoes">${esc(p?.observacoes || "")}</textarea></label>
       <div class="row gap end">
         ${p ? '<button type="button" class="btn danger" data-del>Excluir</button>' : ""}
@@ -499,7 +502,9 @@ function formParceiro(p = null) {
     </form>`);
   $("#f").onsubmit = async (e) => {
     e.preventDefault();
-    try { const d = formData(e.target); p ? await db.parceiros.update(p.id, d) : await db.parceiros.create(d); toast("Salvo."); close(); route(); }
+    const d = formData(e.target);
+    d.base_antiga = !!e.target.base_antiga.checked;
+    try { p ? await db.parceiros.update(p.id, d) : await db.parceiros.create(d); toast("Salvo."); close(); route(); }
     catch (err) { toast(err.message, "err"); }
   };
   if (p) $("[data-del]").onclick = async () => {
@@ -656,44 +661,6 @@ async function viewPresenca() {
     });
   }
 
-  function editPresenca(p) {
-    const opts = funcsAll
-      .map((f) => `<option value="${f.id}" ${p.funcionario_id === f.id ? "selected" : ""}>${esc(f.nome)}</option>`)
-      .join("");
-    const { close } = openModal("Editar registro", `
-      <form id="f" class="form">
-        <label>Data<input name="data" type="date" value="${esc(String(p.data).slice(0, 10))}" required /></label>
-        <label>Colaborador
-          <select name="funcionario_id" required>${opts}</select>
-        </label>
-        <label>Status
-          <select name="status">
-            <option value="PRESENTE" ${p.status === "PRESENTE" ? "selected" : ""}>Presente</option>
-            <option value="FALTA" ${p.status === "FALTA" ? "selected" : ""}>Falta</option>
-          </select>
-        </label>
-        <label>Hora<input name="hora" type="time" value="${esc(p.hora ? p.hora.slice(0, 5) : "")}" /></label>
-        <div class="row gap end">
-          <button class="btn primary" type="submit">Salvar</button>
-        </div>
-      </form>`);
-
-    $("#f").onsubmit = async (e) => {
-      e.preventDefault();
-      const d = formData(e.target);
-      d.hora = d.hora ? `${d.hora}:00` : null;
-      try {
-        await db.presenca.update(p.id, d);
-        toast("Registro atualizado.");
-        close();
-        renderMarcar();
-        renderHist();
-      } catch (err) {
-        toast(err.message || "Erro ao atualizar.", "err");
-      }
-    };
-  }
-
   async function renderHist() {
     const all = await db.presenca.list(500);
 
@@ -730,7 +697,7 @@ async function viewPresenca() {
     const list = ps.filtro ? all.filter((p) => p.funcionario_id === ps.filtro) : all;
     $("#histTabela").innerHTML = list.length
       ? `<div class="table-wrap"><table>
-          <thead><tr><th>Data</th><th>Colaborador</th><th>Status</th><th>Hora</th><th></th></tr></thead>
+          <thead><tr><th>Data</th><th>Colaborador</th><th>Status</th><th>Hora</th></tr></thead>
           <tbody>${list
             .map(
               (p) => `<tr>
@@ -738,12 +705,10 @@ async function viewPresenca() {
             <td>${esc(p.funcionarios?.nome || "—")}</td>
             <td>${p.status === "PRESENTE" ? '<span class="tag ok">presente</span>' : '<span class="tag warn">falta</span>'}</td>
             <td>${p.hora ? p.hora.slice(0, 5) : "—"}</td>
-            <td class="r"><button class="btn small ghost" data-edit-pres="${p.id}">Editar</button></td>
           </tr>`
             )
             .join("")}</tbody></table></div>`
       : `<div class="empty">Sem registros.</div>`;
-    $$("[data-edit-pres]").forEach((b) => (b.onclick = () => editPresenca(list.find((p) => p.id === b.dataset.editPres))));
   }
 
   $("#presData").onchange = (e) => { ps.data = e.target.value || today(); renderMarcar(); };
