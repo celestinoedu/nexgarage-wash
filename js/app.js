@@ -1,6 +1,7 @@
 import * as db from "./db.js";
 import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js";
 import { renderNovoRegistro } from "./novo.js";
+import { renderRelatorios } from "./relatorios.js";
 
 const MENU = [
   ["dashboard", "🏠", "Início"],
@@ -12,6 +13,7 @@ const MENU = [
   ["presenca", "📋", "Presença"],
   ["servicos", "🧴", "Serviços"],
   ["financeiro", "💰", "Financeiro"],
+  ["relatorios", "📊", "Relatórios"],
 ];
 
 const state = { session: null };
@@ -21,7 +23,7 @@ const APP_VERSION = "1.2";
 // Rodapé com dados da desenvolvedora + versão.
 function footerHTML() {
   return `<footer class="app-footer">
-    Desenvolvido por <strong>LOTUS NEGÓCIOS LTDA</strong> · CNPJ 45.537.878/0001-07
+    Desenvolvido por: <strong>LOTUS NEGÓCIOS LTDA</strong> · CNPJ 45.537.878/0001-07
     <span class="sep">·</span> v${APP_VERSION}
   </footer>`;
 }
@@ -92,14 +94,17 @@ function renderShell() {
   $("#app").innerHTML = `
     <div class="shell">
       <aside class="sidebar" id="sidebar">
-        <img class="brand-logo side" src="assets/logo.png" alt="Top Line Higienizações" />
+        <div class="sidebar-brand-row">
+          <img class="brand-logo side" src="assets/logo.png" alt="Top Line Higienizações" />
+          <button class="sidebar-collapse-btn" id="sidebarCollapse" title="Minimizar menu" aria-label="Minimizar menu">«</button>
+        </div>
         <nav id="nav"></nav>
         <div class="sidebar-bottom">
           <div class="row between" style="align-items:center;gap:10px">
             <button class="btn ghost" id="logout">Sair</button>
             ${themeSwitchHTML()}
           </div>
-          <div class="sidebar-footer">LOTUS NEGÓCIOS LTDA<br>CNPJ 45.537.878/0001-07 · v${APP_VERSION}</div>
+          <div class="sidebar-footer">Desenvolvido por:<br><strong>LOTUS NEGÓCIOS LTDA</strong><br>CNPJ 45.537.878/0001-07 · v${APP_VERSION}</div>
         </div>
       </aside>
       <div class="backdrop-nav" id="navBackdrop"></div>
@@ -115,9 +120,17 @@ function renderShell() {
     </div>`;
 
   $("#nav").innerHTML = MENU.map(
-    ([id, ic, label]) => `<button class="nav-item" data-route="${id}"><span>${ic}</span>${label}</button>`
+    ([id, ic, label]) => `<button class="nav-item" data-route="${id}" title="${label}"><span class="nav-icon">${ic}</span><span class="nav-label">${label}</span></button>`
   ).join("");
 
+  const setSidebarCollapsed = (collapsed) => {
+    document.body.classList.toggle("sidebar-collapsed", collapsed);
+    localStorage.setItem("tl_sidebar_collapsed", collapsed ? "1" : "0");
+    $("#sidebarCollapse").textContent = collapsed ? "»" : "«";
+    $("#sidebarCollapse").title = collapsed ? "Expandir menu" : "Minimizar menu";
+  };
+  setSidebarCollapsed(localStorage.getItem("tl_sidebar_collapsed") === "1");
+  $("#sidebarCollapse").onclick = () => setSidebarCollapsed(!document.body.classList.contains("sidebar-collapsed"));
   $("#themeToggle").onclick = toggleTheme;
   $("#logout").onclick = () => db.auth.signOut();
   $("#novoBtn").onclick = () => renderNovoRegistro({ onSaved: () => route() });
@@ -140,6 +153,7 @@ const ROUTES = {
   presenca: viewPresenca,
   servicos: viewServicos,
   financeiro: viewFinanceiro,
+  relatorios: renderRelatorios,
 };
 
 async function route() {
@@ -991,6 +1005,14 @@ async function viewFinanceiro() {
   const fechamentos = Object.entries(dias).sort(([a], [b]) => b.localeCompare(a));
 
   $("#view").innerHTML = `
+    <nav class="finance-nav" aria-label="Visualizações do financeiro">
+      <button class="finance-nav-item active" data-fin-tab="dashboard">📊 Dashboard</button>
+      <button class="finance-nav-item" data-fin-tab="divisao">👥 Resumo da Divisão</button>
+      <button class="finance-nav-item" data-fin-tab="fechamento">📚 Histórico de Fechamento</button>
+      <button class="finance-nav-item" data-fin-tab="lancamentos">🧾 Lançamentos Detalhados</button>
+    </nav>
+
+    <section data-fin-section="dashboard">
     <div class="kpis">
       ${kpi("Entradas (mês)", money(entradas))}
       ${kpi("Saídas (mês)", money(saidas))}
@@ -998,7 +1020,7 @@ async function viewFinanceiro() {
       ${kpi("Total pendente", money(totalPendente), `${pendentesAts.length} a receber`)}
     </div>
 
-    <div class="grid-2">
+    <div class="grid-2 finance-single-grid">
       ${card(`
         <div class="card-head"><h3>💵 Caixa discriminado (acum.)</h3></div>
         <div class="list">
@@ -1013,7 +1035,11 @@ async function viewFinanceiro() {
           <button class="btn ok block" id="addEnt">+ Entrada</button>
           <button class="btn danger block" id="addSai">+ Saída</button>
         </div>`)}
+    </div>
+    </section>
 
+    <section data-fin-section="divisao" hidden>
+    <div class="grid-2 finance-single-grid">
       ${card(`
         <div class="card-head"><h3>👥 Distribuição de lucro (mês)</h3>
           <button class="btn small" id="relYuri">📄 Relatório p/ Yuri</button></div>
@@ -1042,14 +1068,18 @@ async function viewFinanceiro() {
             <td>${l.base_antiga ? '<span class="tag yuri">40/60</span>' : '<span class="tag split50">50/50</span>'}</td><td class="r">${money(l.valor)}</td><td class="r">${money(l.empresa)}</td><td class="r">${money(l.rennan)}</td><td class="r"><strong>${money(l.yuri)}</strong></td></tr>`;
         }).join("") : '<tr><td colspan="7" class="empty small">Nenhum serviço recebido neste mês.</td></tr>'}</tbody>
       </table></div>`) }
+    </section>
 
+    <section data-fin-section="fechamento" hidden>
     ${card(`
       <div class="card-head"><h3>📚 Histórico de fechamento diário</h3></div>
       <div class="table-wrap"><table>
         <thead><tr><th>Dia</th><th class="r">Carros</th><th class="r">Faturado</th><th class="r">Recebido</th><th class="r">Saídas</th><th class="r">Saldo do dia</th></tr></thead>
         <tbody>${fechamentos.length ? fechamentos.slice(0, 180).map(([data, f]) => `<tr><td><strong>${dateBR(data)}</strong></td><td class="r">${f.carros}</td><td class="r">${money(f.faturado)}</td><td class="r">${money(f.recebido)}</td><td class="r">${money(f.saidas)}</td><td class="r"><strong>${money(f.recebido - f.saidas)}</strong></td></tr>`).join("") : '<tr><td colspan="6" class="empty small">Sem fechamentos.</td></tr>'}</tbody>
       </table></div>`) }
+    </section>
 
+    <section data-fin-section="lancamentos" hidden>
     ${card(`
       <div class="card-head"><h3>Lançamentos</h3></div>
       <div class="table-wrap"><table>
@@ -1067,7 +1097,17 @@ async function viewFinanceiro() {
         </tr>`
           )
           .join("")}</tbody>
-      </table></div>`)}`;
+      </table></div>`) }
+    </section>`;
+
+  const setFinanceTab = (tab) => {
+    const valido = ["dashboard", "divisao", "fechamento", "lancamentos"].includes(tab) ? tab : "dashboard";
+    $$('[data-fin-section]').forEach((s) => { s.hidden = s.dataset.finSection !== valido; });
+    $$('[data-fin-tab]').forEach((b) => b.classList.toggle("active", b.dataset.finTab === valido));
+    localStorage.setItem("tl_finance_tab", valido);
+  };
+  $$('[data-fin-tab]').forEach((b) => b.onclick = () => setFinanceTab(b.dataset.finTab));
+  setFinanceTab(localStorage.getItem("tl_finance_tab") || "dashboard");
 
   $("#addEnt").onclick = () => formFinanceiro("ENTRADA");
   $("#addSai").onclick = () => formFinanceiro("SAIDA");

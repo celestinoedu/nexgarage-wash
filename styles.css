@@ -67,12 +67,18 @@ hr { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
   height: 100dvh; overflow-y: auto;
 }
 .sidebar .brand { padding: 6px 10px 14px; }
+.sidebar-brand-row { position: relative; min-height: 52px; }
+.sidebar-collapse-btn {
+  position: absolute; right: -5px; bottom: 2px; width: 28px; height: 28px; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--txt); cursor: pointer; font-weight: 800;
+}
 #nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
 .nav-item {
   display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px;
   background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; text-align: left; width: 100%;
 }
 .nav-item span { width: 22px; text-align: center; }
+.nav-item .nav-label { width: auto; text-align: left; }
 .nav-item:hover { background: var(--panel-2); color: var(--txt); }
 .nav-item.active { background: var(--primary); color: #fff; }
 .sidebar-bottom { margin-top: 8px; flex-shrink: 0; }
@@ -103,6 +109,19 @@ html[data-theme="light"] .theme-switch .ts-thumb { left: 2px; }
 .app-footer { padding: 18px 20px 28px; text-align: center; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); margin-top: 10px; }
 .app-footer .sep { margin: 0 6px; opacity: .6; }
 .auth .app-footer { border: none; margin-top: 18px; }
+
+@media (min-width: 821px) {
+  .shell, .sidebar { transition: grid-template-columns .2s ease, width .2s ease; }
+  body.sidebar-collapsed .shell { grid-template-columns: 76px 1fr; }
+  body.sidebar-collapsed .sidebar { padding-left: 10px; padding-right: 10px; }
+  body.sidebar-collapsed .brand-logo.side,
+  body.sidebar-collapsed .nav-label,
+  body.sidebar-collapsed .sidebar-bottom { display: none; }
+  body.sidebar-collapsed .sidebar-brand-row { min-height: 38px; }
+  body.sidebar-collapsed .sidebar-collapse-btn { right: 8px; bottom: 5px; }
+  body.sidebar-collapsed .nav-item { justify-content: center; padding-left: 8px; padding-right: 8px; }
+  body.sidebar-collapsed .nav-item .nav-icon { width: auto; font-size: 18px; }
+}
 
 /* ---------- BUTTONS ---------- */
 .btn {
@@ -191,6 +210,21 @@ tr:hover td { background: rgba(255,255,255,.02); }
 .inline-date input { width: auto; }
 select.mini { width: auto; max-width: 220px; padding: 6px 10px; font-size: 13px; }
 
+/* ---------- NAVEGAÇÃO FINANCEIRO ---------- */
+.finance-nav {
+  display: flex; gap: 6px; margin-bottom: 18px; padding: 6px; overflow-x: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  position: sticky; top: 65px; z-index: 4;
+}
+.finance-nav-item {
+  flex: 1 0 auto; border: 0; border-radius: 9px; padding: 10px 14px; cursor: pointer;
+  background: transparent; color: var(--muted); font: inherit; font-weight: 600; white-space: nowrap;
+}
+.finance-nav-item:hover { background: var(--panel-2); color: var(--txt); }
+.finance-nav-item.active { background: var(--primary); color: #fff; }
+.finance-single-grid { grid-template-columns: minmax(0, 1fr); }
+[data-fin-section][hidden] { display: none !important; }
+
 /* ---------- MODAL ---------- */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(3,8,18,.7); display: grid; place-items: center; padding: 16px; z-index: 50; }
 .modal-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); width: min(520px, 100%); max-height: 92dvh; overflow: auto; box-shadow: var(--shadow); }
@@ -221,6 +255,12 @@ select.mini { width: auto; max-width: 220px; padding: 6px 10px; font-size: 13px;
 .service-values label { display: grid; gap: 2px; color: var(--muted); font-size: 11px; }
 .service-values input { width: 105px; }
 .discount-total { display: block; color: var(--ok); font-size: 12px; text-align: right; }
+.report-hero { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.report-hero p, .report-card p { margin: 5px 0 0; }
+.report-grid { align-items: stretch; }
+.report-card { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start; margin-bottom: 0; }
+.report-card .btn { grid-column: 1 / -1; align-self: end; }
+.report-icon { font-size: 26px; line-height: 1; }
 .loading, .empty { color: var(--muted); text-align: center; padding: 30px; }
 .empty.small { padding: 14px; }
 
@@ -243,6 +283,8 @@ select.mini { width: auto; max-width: 220px; padding: 6px 10px; font-size: 13px;
   .grid-form { grid-template-columns: 1fr; }
   .topbar .btn.primary { padding: 8px 12px; font-size: 13px; }
   .view { padding: 14px; }
+  .sidebar-collapse-btn { display: none; }
+  .report-hero { align-items: stretch; flex-direction: column; }
   .report-actions { align-items: stretch; flex-direction: column; }
   .service-values { flex-wrap: wrap; justify-content: flex-end; }
   .service-values label { flex: 1; min-width: 86px; }
