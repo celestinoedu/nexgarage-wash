@@ -30,7 +30,7 @@ export async function renderNovoRegistro({ onSaved } = {}) {
     veiculo: "",
     placa: "",
     base_antiga: false,
-    itens: [], // {nome, valor}
+    itens: [], // {nome, valor, desconto}
   };
 
   const { card, close } = openModal(`Novo Registro · ${osNum}`, body(), { wide: true });
@@ -219,13 +219,13 @@ export async function renderNovoRegistro({ onSaved } = {}) {
       </div>
       <div id="itens" class="list"></div>`;
     $$("[data-serv]", host).forEach((b) => (b.onclick = () => {
-      st.itens.push({ nome: b.dataset.serv, valor: Number(b.dataset.preco || 0) });
+      st.itens.push({ nome: b.dataset.serv, valor: Number(b.dataset.preco || 0), desconto: 0 });
       drawItens();
     }));
     $("#addLivre", host).onclick = () => {
       const nome = $("#servLivre", host).value.trim();
       if (!nome) return;
-      st.itens.push({ nome, valor: Number($("#servLivreV", host).value || 0) });
+      st.itens.push({ nome, valor: Number($("#servLivreV", host).value || 0), desconto: 0 });
       $("#servLivre", host).value = ""; $("#servLivreV", host).value = "";
       drawItens();
     };
@@ -238,21 +238,30 @@ export async function renderNovoRegistro({ onSaved } = {}) {
       ? st.itens
           .map(
             (it, i) => `<div class="list-row">
-        <span>${esc(it.nome)}</span>
-        <div class="row gap">
-          <input type="number" step="0.01" value="${it.valor}" data-val="${i}" style="max-width:100px"/>
+        <span><strong>${esc(it.nome)}</strong><br><small class="muted">Líquido: ${money(Math.max(0, Number(it.valor || 0) - Number(it.desconto || 0)))}</small></span>
+        <div class="row gap service-values">
+          <label>Valor<input type="number" min="0" step="0.01" value="${it.valor}" data-val="${i}"/></label>
+          <label>Desconto<input type="number" min="0" step="0.01" value="${it.desconto || 0}" data-desc="${i}"/></label>
           <button class="btn small ghost" data-rm="${i}">✕</button>
         </div></div>`
           )
           .join("")
       : `<div class="empty small">Nenhum serviço adicionado.</div>`;
     $$("[data-val]", host).forEach((inp) => (inp.oninput = () => { st.itens[inp.dataset.val].valor = Number(inp.value || 0); updateTotal(); }));
+    $$("[data-desc]", host).forEach((inp) => (inp.oninput = () => {
+      const it = st.itens[inp.dataset.desc];
+      it.desconto = Math.min(Number(it.valor || 0), Math.max(0, Number(inp.value || 0)));
+      updateTotal();
+    }));
     $$("[data-rm]", host).forEach((b) => (b.onclick = () => { st.itens.splice(Number(b.dataset.rm), 1); drawItens(); }));
     updateTotal();
   }
 
-  function total() { return st.itens.reduce((s, it) => s + Number(it.valor || 0), 0); }
-  function updateTotal() { $("#total", card).textContent = money(total()); }
+  function total() { return st.itens.reduce((s, it) => s + Math.max(0, Number(it.valor || 0) - Number(it.desconto || 0)), 0); }
+  function updateTotal() {
+    const desc = st.itens.reduce((s, it) => s + Math.min(Number(it.valor || 0), Number(it.desconto || 0)), 0);
+    $("#total", card).innerHTML = `${money(total())}${desc ? `<small class="discount-total">desconto ${money(desc)}</small>` : ""}`;
+  }
 
   async function salvar() {
     try {
@@ -294,8 +303,14 @@ export async function renderNovoRegistro({ onSaved } = {}) {
       const data = $("#data", card).value || today();
       const forma = $("#forma", card).value;
       const obs = $("#obs", card).value.trim();
-      const servicosTxt = st.itens.map((i) => i.nome).join(" + ");
-      const valor = total();
+      const itensServicos = st.itens.map((i) => ({
+        nome: i.nome,
+        valor: Math.max(0, Number(i.valor || 0)),
+        desconto: Math.min(Math.max(0, Number(i.valor || 0)), Math.max(0, Number(i.desconto || 0))),
+      }));
+      const servicosTxt = itensServicos.map((i) => i.desconto ? `${i.nome} (desc. ${money(i.desconto)})` : i.nome).join(" + ");
+      const valor = itensServicos.reduce((s, i) => s + i.valor - i.desconto, 0);
+      const desconto = itensServicos.reduce((s, i) => s + i.desconto, 0);
 
       const atend = await db.atendimentos.create({
         os_numero: osNum,
@@ -307,6 +322,8 @@ export async function renderNovoRegistro({ onSaved } = {}) {
         veiculo: st.veiculo,
         placa: st.placa,
         servicos: servicosTxt,
+        itens_servicos: itensServicos,
+        desconto,
         valor,
         forma_pgto: forma,
         status_pg: status,

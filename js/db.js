@@ -96,6 +96,21 @@ export const atendimentos = {
   remove: (id) => supabase.from("atendimentos").delete().eq("id", id).then(ok),
 };
 
+// ---- Agenda de lavagens ---------------------------------------------------
+export const agenda = {
+  list: (limit = 500) =>
+    supabase
+      .from("agenda_lavagens")
+      .select("*, clientes(nome,telefone), carros(placa,veiculo)")
+      .order("data", { ascending: true })
+      .order("hora", { ascending: true })
+      .limit(limit)
+      .then(ok),
+  create: (row) => supabase.from("agenda_lavagens").insert(row).select().single().then(ok),
+  update: (id, row) => supabase.from("agenda_lavagens").update(row).eq("id", id).select().single().then(ok),
+  remove: (id) => supabase.from("agenda_lavagens").delete().eq("id", id).then(ok),
+};
+
 // ---- Financeiro ------------------------------------------------------------
 export const financeiro = {
   list: (limit = 500) =>

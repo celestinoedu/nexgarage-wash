@@ -214,6 +214,13 @@ select.mini { width: auto; max-width: 220px; padding: 6px 10px; font-size: 13px;
 
 /* ---------- STATES ---------- */
 .alert { background: rgba(240,169,59,.12); border: 1px solid rgba(240,169,59,.4); color: var(--warn); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-size: 14px; }
+.alert-action { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.alert-action .btn { margin-left: auto; }
+.report-actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 0 18px; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.service-values label { display: grid; gap: 2px; color: var(--muted); font-size: 11px; }
+.service-values input { width: 105px; }
+.discount-total { display: block; color: var(--ok); font-size: 12px; text-align: right; }
 .loading, .empty { color: var(--muted); text-align: center; padding: 30px; }
 .empty.small { padding: 14px; }
 
@@ -236,4 +243,8 @@ select.mini { width: auto; max-width: 220px; padding: 6px 10px; font-size: 13px;
   .grid-form { grid-template-columns: 1fr; }
   .topbar .btn.primary { padding: 8px 12px; font-size: 13px; }
   .view { padding: 14px; }
+  .report-actions { align-items: stretch; flex-direction: column; }
+  .service-values { flex-wrap: wrap; justify-content: flex-end; }
+  .service-values label { flex: 1; min-width: 86px; }
+  .service-values input { width: 100%; }
 }

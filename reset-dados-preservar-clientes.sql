@@ -8,6 +8,7 @@ begin;
 truncate table
   financeiro,
   presenca,
+  agenda_lavagens,
   atendimentos,
   parceiros,
   funcionarios,

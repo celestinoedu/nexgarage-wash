@@ -5,6 +5,7 @@ import { renderNovoRegistro } from "./novo.js";
 const MENU = [
   ["dashboard", "🏠", "Início"],
   ["atendimentos", "🧾", "Atendimentos"],
+  ["agenda", "📅", "Agenda"],
   ["clientes", "👤", "Clientes"],
   ["parceiros", "🤝", "Parceiros"],
   ["funcionarios", "👷", "Funcionários"],
@@ -15,7 +16,7 @@ const MENU = [
 
 const state = { session: null };
 
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.2";
 
 // Rodapé com dados da desenvolvedora + versão.
 function footerHTML() {
@@ -132,6 +133,7 @@ function renderShell() {
 const ROUTES = {
   dashboard: viewDashboard,
   atendimentos: viewAtendimentos,
+  agenda: viewAgenda,
   clientes: viewClientes,
   parceiros: viewParceiros,
   funcionarios: viewFuncionarios,
@@ -188,9 +190,13 @@ function bindCollapsibles(root = document) {
 
 // ============================================================ DASHBOARD
 async function viewDashboard() {
-  const [ats, oportRaw] = await Promise.all([
+  const [ats, oportRaw, financeiro, funcs, presHoje, agenda] = await Promise.all([
     db.atendimentos.list(500),
     db.views.ultimaLavagem(),
+    db.financeiro.list(1000),
+    db.funcionarios.list(),
+    db.presenca.byData(today()),
+    db.agenda.list(500),
   ]);
   const hoje = today();
   const hojeAts = ats.filter((a) => String(a.data).slice(0, 10) === hoje);
@@ -198,15 +204,37 @@ async function viewDashboard() {
   const faturHoje = hojeAts.reduce((s, a) => s + Number(a.valor || 0), 0);
   const pendHoje = hojeAts.filter((a) => a.status_pg === "PENDENTE");
   const receberHoje = pendHoje.reduce((s, a) => s + Number(a.valor || 0), 0);
+  const recebHoje = financeiro
+    .filter((l) => l.tipo === "ENTRADA" && String(l.data).slice(0, 10) === hoje)
+    .reduce((s, l) => s + Number(l.valor || 0), 0);
+
+  const ativos = funcs.filter((f) => f.ativo !== false);
+  const lancados = new Set(presHoje.map((p) => p.funcionario_id));
+  const semPresenca = ativos.filter((f) => !lancados.has(f.id));
+  const proximos = agenda.filter((a) => a.status === "AGENDADO" && String(a.data).slice(0, 10) >= hoje);
 
   const opor = (oportRaw || []).filter((o) => o.dias_sem_lavar >= 15);
 
   $("#view").innerHTML = `
-    <div class="kpis kpis-3">
+    ${semPresenca.length ? `<div class="alert alert-action">⚠️ Presença de hoje ainda não lançada para <strong>${semPresenca.map((f) => esc(f.nome)).join(", ")}</strong>.
+      <button class="btn small" id="irPresenca">Lançar agora</button></div>` : ""}
+    <div class="kpis">
       ${kpi("Carros hoje", carrosHoje)}
       ${kpi("Faturamento hoje", money(faturHoje))}
+      ${kpi("Recebido hoje", money(recebHoje), "entradas no caixa")}
       ${kpi("A receber hoje", money(receberHoje), `${pendHoje.length} pendência(s)`)}
     </div>
+
+    ${collapsibleCard("agenda_inicio", `<h3>📅 Próximas lavagens agendadas</h3><span class="badge">${proximos.length}</span>`, `
+      <div class="list">
+        ${proximos.length ? proximos.slice(0, 12).map((a) => `<div class="list-row">
+          <div><strong>${dateBR(a.data)}${a.hora ? ` às ${esc(a.hora.slice(0, 5))}` : ""}</strong> · ${esc(a.clientes?.nome || "—")}<br>
+            <small class="muted">${esc(a.carros?.veiculo || "Veículo não informado")} ${esc(a.carros?.placa || "")} ${a.servicos ? `· ${esc(a.servicos)}` : ""}</small></div>
+          <button class="btn small ghost" data-agenda-open="${a.id}">Abrir</button>
+        </div>`).join("") : `<div class="empty small">Nenhuma lavagem agendada.</div>`}
+      </div>
+      <button class="btn small primary" id="novaAgendaInicio" style="margin-top:10px">+ Agendar lavagem</button>
+    `)}
 
     ${collapsibleCard("ultimos", `<h3>🕒 Últimos atendimentos</h3>`, tableAtend(ats.slice(0, 8)))}
 
@@ -235,6 +263,9 @@ async function viewDashboard() {
 
   bindAtendEdits(ats);
   bindCollapsibles();
+  if ($("#irPresenca")) $("#irPresenca").onclick = () => { location.hash = "presenca"; };
+  $("#novaAgendaInicio").onclick = () => formAgenda(null, agenda);
+  $$('[data-agenda-open]').forEach((b) => b.onclick = () => formAgenda(agenda.find((a) => a.id === b.dataset.agendaOpen), agenda));
 }
 
 // Tag do rateio conforme a base do cliente (base antiga = 40/60, demais = 50/50).
@@ -372,6 +403,67 @@ async function viewAtendimentos() {
     );
     $("#atTable").innerHTML = tableAtend(f);
     bindAtendEdits(list);
+  };
+}
+
+// ============================================================ AGENDA
+async function viewAgenda() {
+  const list = await db.agenda.list(500);
+  const render = (rows) => rows.length ? `<div class="table-wrap"><table>
+    <thead><tr><th>Data / hora</th><th>Cliente</th><th>Carro</th><th>Serviço</th><th>Status</th><th></th></tr></thead>
+    <tbody>${rows.map((a) => `<tr>
+      <td><strong>${dateBR(a.data)}</strong>${a.hora ? `<br><small>${esc(a.hora.slice(0, 5))}</small>` : ""}</td>
+      <td>${esc(a.clientes?.nome || "—")}</td>
+      <td>${esc(a.carros?.veiculo || "—")}<br><small class="muted">${esc(a.carros?.placa || "")}</small></td>
+      <td>${esc(a.servicos || "—")}</td>
+      <td>${a.status === "AGENDADO" ? '<span class="tag warn">agendado</span>' : a.status === "CONCLUIDO" ? '<span class="tag ok">concluído</span>' : '<span class="tag">cancelado</span>'}</td>
+      <td class="r"><button class="btn small ghost" data-edit-ag="${a.id}">Editar</button></td>
+    </tr>`).join("")}</tbody></table></div>` : `<div class="empty">Nenhum agendamento.</div>`;
+
+  const futuros = list.filter((a) => a.status === "AGENDADO" && String(a.data).slice(0, 10) >= today());
+  $("#view").innerHTML = `
+    <div class="toolbar">
+      <select id="agendaFiltro" class="mini"><option value="PROXIMOS">Próximos agendamentos</option><option value="TODOS">Todos</option><option value="CONCLUIDO">Concluídos</option><option value="CANCELADO">Cancelados</option></select>
+      <button class="btn primary" id="addAgenda">+ Agendar lavagem</button>
+    </div><div id="agendaTabela">${render(futuros)}</div>`;
+
+  const bind = (rows) => $$('[data-edit-ag]').forEach((b) => b.onclick = () => formAgenda(rows.find((a) => a.id === b.dataset.editAg), list));
+  bind(futuros);
+  $("#addAgenda").onclick = () => formAgenda(null, list);
+  $("#agendaFiltro").onchange = (e) => {
+    const v = e.target.value;
+    const rows = v === "TODOS" ? list : v === "PROXIMOS" ? futuros : list.filter((a) => a.status === v);
+    $("#agendaTabela").innerHTML = render(rows); bind(rows);
+  };
+}
+
+async function formAgenda(a = null) {
+  const [clientes, carros] = await Promise.all([db.clientes.list(), db.carros.list()]);
+  const clienteInicial = a?.cliente_id || "";
+  const carrosDoCliente = (cid) => carros.filter((c) => c.cliente_id === cid);
+  const optionsCarros = (cid, selected = "") => `<option value="">Selecione…</option>${carrosDoCliente(cid)
+    .map((c) => `<option value="${c.id}" ${c.id === selected ? "selected" : ""}>${esc(c.placa)}${c.veiculo ? ` · ${esc(c.veiculo)}` : ""}</option>`).join("")}`;
+  const { card, close } = openModal(a ? "Editar agendamento" : "Agendar lavagem", `
+    <form id="agendaForm" class="form">
+      <div class="grid-form">
+        <label>Data<input name="data" type="date" required value="${esc(String(a?.data || today()).slice(0, 10))}"/></label>
+        <label>Hora<input name="hora" type="time" value="${esc(a?.hora?.slice(0, 5) || "")}"/></label>
+      </div>
+      <label>Cliente<select name="cliente_id" id="agendaCliente" required><option value="">Selecione…</option>${clientes.map((c) => `<option value="${c.id}" ${c.id === clienteInicial ? "selected" : ""}>${esc(c.nome)}</option>`).join("")}</select></label>
+      <label>Carro<select name="carro_id" id="agendaCarro">${optionsCarros(clienteInicial, a?.carro_id)}</select></label>
+      <label>Serviço desejado<input name="servicos" value="${esc(a?.servicos || "")}" placeholder="Ex: lavagem completa"/></label>
+      <label>Observações<textarea name="observacoes">${esc(a?.observacoes || "")}</textarea></label>
+      <label>Status<select name="status"><option value="AGENDADO" ${!a || a.status === "AGENDADO" ? "selected" : ""}>Agendado</option><option value="CONCLUIDO" ${a?.status === "CONCLUIDO" ? "selected" : ""}>Concluído</option><option value="CANCELADO" ${a?.status === "CANCELADO" ? "selected" : ""}>Cancelado</option></select></label>
+      <div class="row gap end">${a ? '<button type="button" class="btn danger" data-del-ag>Excluir</button>' : ""}<button class="btn primary">Salvar</button></div>
+    </form>`);
+  $("#agendaCliente", card).onchange = (e) => { $("#agendaCarro", card).innerHTML = optionsCarros(e.target.value); };
+  $("#agendaForm", card).onsubmit = async (e) => {
+    e.preventDefault(); const d = formData(e.target); d.hora = d.hora || null; d.carro_id = d.carro_id || null;
+    try { a ? await db.agenda.update(a.id, d) : await db.agenda.create(d); toast("Agendamento salvo."); close(); route(); }
+    catch (err) { toast(err.message, "err"); }
+  };
+  if (a) $("[data-del-ag]", card).onclick = async () => {
+    if (await confirmDialog("Excluir este agendamento?")) { await db.agenda.remove(a.id); toast("Agendamento excluído."); close(); route(); }
   };
 }
 
@@ -571,7 +663,20 @@ function formParceiro(p = null) {
 
 async function extratoParceiro(p) {
   const ats = await db.atendimentos.byParceiro(p.id);
+  const pendentes = ats.filter((a) => a.status_pg === "PENDENTE");
+  const totalPendente = pendentes.reduce((s, a) => s + Number(a.valor || 0), 0);
+  const textoCobranca = [
+    `Olá, ${p.nome}! Segue o relatório dos serviços pendentes:`,
+    "",
+    ...pendentes.map((a) => `${dateBR(a.data)} — ${a.veiculo || "Veículo"}${a.placa ? ` (${a.placa})` : ""}\n${a.servicos || "Serviço"} — ${money(a.valor)}`),
+    "",
+    `TOTAL A PAGAR: ${money(totalPendente)}`,
+  ].join("\n");
   const { card } = openModal(`Extrato — ${p.nome}`, `
+    <div class="report-actions">
+      <div><strong>A cobrar: ${money(totalPendente)}</strong><br><small class="muted">Relatório organizado por data, carro e serviço.</small></div>
+      <button class="btn wa" id="copiarCobranca" ${pendentes.length ? "" : "disabled"}>📋 Copiar para WhatsApp</button>
+    </div>
     <div class="table-wrap"><table>
       <thead><tr><th>Data</th><th>Veículo</th><th>Serviços</th><th class="r">Valor</th><th>Pg</th><th></th></tr></thead>
       <tbody id="ext">${ats
@@ -584,9 +689,13 @@ async function extratoParceiro(p) {
         )
         .join("")}</tbody>
       <tfoot><tr><td colspan="3"><strong>Total a cobrar</strong></td>
-        <td class="r"><strong>${money(ats.filter((a) => a.status_pg === "PENDENTE").reduce((s, a) => s + Number(a.valor || 0), 0))}</strong></td>
+        <td class="r"><strong>${money(totalPendente)}</strong></td>
         <td colspan="2"></td></tr></tfoot>
     </table></div>`, { wide: true });
+  $("#copiarCobranca", card).onclick = async () => {
+    try { await navigator.clipboard.writeText(textoCobranca); toast("Relatório copiado. É só colar no WhatsApp."); }
+    catch { window.prompt("Copie o relatório abaixo:", textoCobranca); }
+  };
   $$("[data-pay]", card).forEach((b) => (b.onclick = async () => {
     const a = ats.find((x) => x.id === b.dataset.pay);
     await db.atendimentos.update(a.id, { status_pg: "PAGO", data_pg: today() });
@@ -864,6 +973,22 @@ async function viewFinanceiro() {
 
   const pct = Number(pctStr || 0) / 100;
   const r = calcRateio(entradasMes, pct);
+  const atsMap = Object.fromEntries(ats.map((a) => [a.id, a]));
+  const rateioServicos = entradasMes.filter((l) => l.atendimento_id).map((l) => {
+    const valor = Number(l.valor || 0), distribuivel = valor * (1 - pct);
+    return {
+      ...l, atendimento: atsMap[l.atendimento_id], empresa: valor * pct,
+      rennan: distribuivel * (l.base_antiga ? 0.40 : 0.50),
+      yuri: distribuivel * (l.base_antiga ? 0.60 : 0.50),
+    };
+  });
+
+  // Fechamento diário reconstruído dos atendimentos e movimentos do caixa.
+  const dias = {};
+  const dia = (data) => dias[String(data).slice(0, 10)] ||= { carros: 0, faturado: 0, recebido: 0, saidas: 0 };
+  ats.forEach((a) => { const d = dia(a.data); d.carros++; d.faturado += Number(a.valor || 0); });
+  list.forEach((l) => { const d = dia(l.data); l.tipo === "ENTRADA" ? d.recebido += Number(l.valor || 0) : d.saidas += Number(l.valor || 0); });
+  const fechamentos = Object.entries(dias).sort(([a], [b]) => b.localeCompare(a));
 
   $("#view").innerHTML = `
     <div class="kpis">
@@ -904,6 +1029,26 @@ async function viewFinanceiro() {
           <div class="split-box"><span>Yuri</span><strong>${money(r.yuri)}</strong></div>
         </div>`)}
     </div>
+
+    ${card(`
+      <div class="card-head"><h3>🧮 Divisão por serviço recebido (${mes})</h3></div>
+      <p class="muted small">Em cada serviço, primeiro é separada a parte da empresa (${esc(pctStr || 0)}%). Sobre o restante: base antiga = Rennan 40% / Yuri 60%; base nova = 50% / 50%.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Data</th><th>Cliente / serviço</th><th>Regra</th><th class="r">Recebido</th><th class="r">Empresa</th><th class="r">Rennan</th><th class="r">Yuri</th></tr></thead>
+        <tbody>${rateioServicos.length ? rateioServicos.map((l) => {
+          const a = l.atendimento || {};
+          const quem = a.tipo === "PARCEIRO" ? a.parceiros?.nome : a.clientes?.nome;
+          return `<tr><td>${dateBR(l.data)}</td><td><strong>${esc(quem || a.veiculo || "Serviço")}</strong><br><small class="muted">${esc(a.servicos || l.descricao || "")}</small></td>
+            <td>${l.base_antiga ? '<span class="tag yuri">40/60</span>' : '<span class="tag split50">50/50</span>'}</td><td class="r">${money(l.valor)}</td><td class="r">${money(l.empresa)}</td><td class="r">${money(l.rennan)}</td><td class="r"><strong>${money(l.yuri)}</strong></td></tr>`;
+        }).join("") : '<tr><td colspan="7" class="empty small">Nenhum serviço recebido neste mês.</td></tr>'}</tbody>
+      </table></div>`) }
+
+    ${card(`
+      <div class="card-head"><h3>📚 Histórico de fechamento diário</h3></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Dia</th><th class="r">Carros</th><th class="r">Faturado</th><th class="r">Recebido</th><th class="r">Saídas</th><th class="r">Saldo do dia</th></tr></thead>
+        <tbody>${fechamentos.length ? fechamentos.slice(0, 180).map(([data, f]) => `<tr><td><strong>${dateBR(data)}</strong></td><td class="r">${f.carros}</td><td class="r">${money(f.faturado)}</td><td class="r">${money(f.recebido)}</td><td class="r">${money(f.saidas)}</td><td class="r"><strong>${money(f.recebido - f.saidas)}</strong></td></tr>`).join("") : '<tr><td colspan="6" class="empty small">Sem fechamentos.</td></tr>'}</tbody>
+      </table></div>`) }
 
     ${card(`
       <div class="card-head"><h3>Lançamentos</h3></div>
