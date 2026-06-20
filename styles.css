@@ -67,9 +67,9 @@ hr { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
   height: 100dvh; overflow-y: auto;
 }
 .sidebar .brand { padding: 6px 10px 14px; }
-.sidebar-brand-row { position: relative; min-height: 52px; }
+.sidebar-brand-row { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 .sidebar-collapse-btn {
-  position: absolute; right: -5px; bottom: 2px; width: 28px; height: 28px; border-radius: 50%;
+  position: static; flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%;
   border: 1px solid var(--line); background: var(--panel-2); color: var(--txt); cursor: pointer; font-weight: 800;
 }
 #nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
@@ -117,8 +117,7 @@ html[data-theme="light"] .theme-switch .ts-thumb { left: 2px; }
   body.sidebar-collapsed .brand-logo.side,
   body.sidebar-collapsed .nav-label,
   body.sidebar-collapsed .sidebar-bottom { display: none; }
-  body.sidebar-collapsed .sidebar-brand-row { min-height: 38px; }
-  body.sidebar-collapsed .sidebar-collapse-btn { right: 8px; bottom: 5px; }
+  body.sidebar-collapsed .sidebar-brand-row { min-height: 38px; align-items: center; justify-content: center; }
   body.sidebar-collapsed .nav-item { justify-content: center; padding-left: 8px; padding-right: 8px; }
   body.sidebar-collapsed .nav-item .nav-icon { width: auto; font-size: 18px; }
 }
