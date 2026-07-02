@@ -66,6 +66,16 @@ export const funcionarios = {
   remove: (id) => supabase.from("funcionarios").delete().eq("id", id).then(ok),
 };
 
+// ---- Vales de funcionários -------------------------------------------------
+export const vales = {
+  byFuncionario: (fid) =>
+    supabase.from("vales").select("*").eq("funcionario_id", fid).order("data", { ascending: false }).then(ok),
+  list: (limit = 500) =>
+    supabase.from("vales").select("*, funcionarios(nome)").order("data", { ascending: false }).limit(limit).then(ok),
+  create: (row) => supabase.from("vales").insert(row).select().single().then(ok),
+  remove: (id) => supabase.from("vales").delete().eq("id", id).then(ok),
+};
+
 // ---- Serviços --------------------------------------------------------------
 export const servicos = {
   list: () => supabase.from("servicos").select("*").order("nome").then(ok),

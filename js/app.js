@@ -18,7 +18,7 @@ const MENU = [
 
 const state = { session: null };
 
-const APP_VERSION = "1.2";
+const APP_VERSION = "1.3";
 
 // Rodapé com dados da desenvolvedora + versão.
 function footerHTML() {
@@ -202,6 +202,19 @@ function bindCollapsibles(root = document) {
   });
 }
 
+// ============================================================ DATAS DO NEGÓCIO
+// Formata um Date local como YYYY-MM-DD (sem depender de fuso horário).
+const fmtISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+// Data de N dias atrás, a partir de hoje.
+const daysAgo = (n) => { const d = new Date(today() + "T12:00:00"); d.setDate(d.getDate() - n); return fmtISO(d); };
+// Mês financeiro: começa no dia 15 e vai até o dia 14 do mês seguinte.
+function mesFinanceiro(ref = today()) {
+  const d = new Date(String(ref).slice(0, 10) + "T12:00:00");
+  const inicio = new Date(d.getFullYear(), d.getMonth() + (d.getDate() >= 15 ? 0 : -1), 15, 12);
+  const fim = new Date(inicio.getFullYear(), inicio.getMonth() + 1, 14, 12);
+  return { inicio: fmtISO(inicio), fim: fmtISO(fim) };
+}
+
 // ============================================================ DASHBOARD
 async function viewDashboard() {
   const [ats, oportRaw, financeiro, funcs, presHoje, agenda] = await Promise.all([
@@ -229,6 +242,10 @@ async function viewDashboard() {
 
   const opor = (oportRaw || []).filter((o) => o.dias_sem_lavar >= 15);
 
+  // Últimos atendimentos: considera os últimos 29 dias.
+  const limite29 = daysAgo(29);
+  const ultimos29 = ats.filter((a) => String(a.data).slice(0, 10) >= limite29);
+
   $("#view").innerHTML = `
     ${semPresenca.length ? `<div class="alert alert-action">⚠️ Presença de hoje ainda não lançada para <strong>${semPresenca.map((f) => esc(f.nome)).join(", ")}</strong>.
       <button class="btn small" id="irPresenca">Lançar agora</button></div>` : ""}
@@ -250,7 +267,10 @@ async function viewDashboard() {
       <button class="btn small primary" id="novaAgendaInicio" style="margin-top:10px">+ Agendar lavagem</button>
     `)}
 
-    ${collapsibleCard("ultimos", `<h3>🕒 Últimos atendimentos</h3>`, tableAtend(ats.slice(0, 8)))}
+    ${collapsibleCard("ultimos", `<h3>🕒 Últimos atendimentos</h3><span class="badge">${ultimos29.length}</span>`, `
+      <p class="muted small">Atendimentos dos últimos 29 dias.</p>
+      ${tableAtend(ultimos29)}
+    `)}
 
     ${collapsibleCard("oportunidades", `<h3>🎯 Oportunidades</h3><span class="badge">${opor.length}</span>`, `
       <p class="muted small">Clientes há 15+ dias sem lavar — hora de chamar de volta.</p>
@@ -730,11 +750,58 @@ async function viewFuncionarios() {
         .map(
           (f) => `<tr><td><strong>${esc(f.nome)}</strong></td><td>${esc(f.telefone || "—")}</td>
           <td>${f.ativo ? '<span class="tag ok">ativo</span>' : '<span class="tag">inativo</span>'}</td>
-          <td class="r"><button class="btn small ghost" data-edit="${f.id}">Editar</button></td></tr>`
+          <td class="r"><button class="btn small" data-vales="${f.id}">💵 Vales</button>
+            <button class="btn small ghost" data-edit="${f.id}">Editar</button></td></tr>`
         )
         .join("")}</tbody></table></div>`;
   $("#add").onclick = () => formFunc();
   $$("[data-edit]").forEach((b) => (b.onclick = () => formFunc(list.find((x) => x.id === b.dataset.edit))));
+  $$("[data-vales]").forEach((b) => (b.onclick = () => valesFuncionario(list.find((x) => x.id === b.dataset.vales))));
+}
+
+// Registro de vales (adiantamentos) de um funcionário — para descontar no acerto.
+async function valesFuncionario(f) {
+  let vales;
+  try { vales = await db.vales.byFuncionario(f.id); }
+  catch (err) { toast("Tabela de vales ainda não existe no banco. Rode migracao-v1.3.0.sql no Supabase.", "err"); return; }
+  const total = vales.reduce((s, v) => s + Number(v.valor || 0), 0);
+  const reopen = () => valesFuncionario(f);
+  const { card } = openModal(`Vales — ${f.nome}`, `
+    <div class="report-actions">
+      <div><strong>Total em vales: ${money(total)}</strong><br>
+        <small class="muted">${vales.length} lançamento(s) · descontar no acerto do funcionário.</small></div>
+      <button class="btn primary" id="addVale">+ Registrar vale</button>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Data</th><th>Descrição</th><th class="r">Valor</th><th></th></tr></thead>
+      <tbody>${vales.length ? vales.map((v) => `<tr>
+        <td>${dateBR(v.data)}</td>
+        <td>${esc(v.descricao || "—")}</td>
+        <td class="r">${money(v.valor)}</td>
+        <td class="r"><button class="btn small ghost" data-del-vale="${v.id}">✕</button></td>
+      </tr>`).join("") : '<tr><td colspan="4" class="empty small">Nenhum vale registrado.</td></tr>'}</tbody>
+      <tfoot><tr><td colspan="2"><strong>Total</strong></td><td class="r"><strong>${money(total)}</strong></td><td></td></tr></tfoot>
+    </table></div>`, { wide: true });
+  $("#addVale", card).onclick = () => formVale(f, reopen);
+  $$("[data-del-vale]", card).forEach((b) => (b.onclick = async () => {
+    if (await confirmDialog("Excluir este vale?")) { await db.vales.remove(b.dataset.delVale); toast("Vale excluído."); reopen(); }
+  }));
+}
+
+function formVale(f, onDone = route) {
+  const { close } = openModal(`Novo vale — ${f.nome}`, `
+    <form id="fvale" class="form">
+      <label>Data<input name="data" type="date" value="${today()}" required /></label>
+      <label>Valor<input name="valor" type="number" step="0.01" min="0" required placeholder="0,00" /></label>
+      <label>Descrição / motivo<input name="descricao" placeholder="Ex: adiantamento, vale-transporte…" /></label>
+      <div class="row gap end"><button class="btn primary" type="submit">Salvar vale</button></div>
+    </form>`);
+  $("#fvale").onsubmit = async (e) => {
+    e.preventDefault();
+    const d = formData(e.target); d.valor = Number(d.valor || 0); d.funcionario_id = f.id;
+    try { await db.vales.create(d); toast("Vale registrado."); close(); onDone(); }
+    catch (err) { toast(err.message, "err"); }
+  };
 }
 
 function formFunc(f = null) {
@@ -967,8 +1034,10 @@ async function viewFinanceiro() {
     db.atendimentos.list(1000),
     db.config.get("empresa_pct", "0"),
   ]);
-  const mes = today().slice(0, 7);
-  const doMes = list.filter((l) => String(l.data).slice(0, 7) === mes);
+  // Mês financeiro do dia 15 ao dia 14 do mês seguinte.
+  const { inicio, fim } = mesFinanceiro();
+  const periodoLabel = `${dateBR(inicio)} a ${dateBR(fim)}`;
+  const doMes = list.filter((l) => { const dd = String(l.data).slice(0, 10); return dd >= inicio && dd <= fim; });
   const entradasMes = doMes.filter((l) => l.tipo === "ENTRADA");
   const entradas = entradasMes.reduce((s, l) => s + Number(l.valor || 0), 0);
   const saidas = doMes.filter((l) => l.tipo === "SAIDA").reduce((s, l) => s + Number(l.valor || 0), 0);
@@ -1014,8 +1083,8 @@ async function viewFinanceiro() {
 
     <section data-fin-section="dashboard">
     <div class="kpis">
-      ${kpi("Entradas (mês)", money(entradas))}
-      ${kpi("Saídas (mês)", money(saidas))}
+      ${kpi("Entradas (mês)", money(entradas), periodoLabel)}
+      ${kpi("Saídas (mês)", money(saidas), periodoLabel)}
       ${kpi("Total em caixa", money(caixa), "recebido − saídas (acum.)")}
       ${kpi("Total pendente", money(totalPendente), `${pendentesAts.length} a receber`)}
     </div>
@@ -1057,7 +1126,7 @@ async function viewFinanceiro() {
     </div>
 
     ${card(`
-      <div class="card-head"><h3>🧮 Divisão por serviço recebido (${mes})</h3></div>
+      <div class="card-head"><h3>🧮 Divisão por serviço recebido (${periodoLabel})</h3></div>
       <p class="muted small">Em cada serviço, primeiro é separada a parte da empresa (${esc(pctStr || 0)}%). Sobre o restante: base antiga = Rennan 40% / Yuri 60%; base nova = 50% / 50%.</p>
       <div class="table-wrap"><table>
         <thead><tr><th>Data</th><th>Cliente / serviço</th><th>Regra</th><th class="r">Recebido</th><th class="r">Empresa</th><th class="r">Rennan</th><th class="r">Yuri</th></tr></thead>
@@ -1116,14 +1185,14 @@ async function viewFinanceiro() {
     await db.config.set("empresa_pct", v);
     toast("% da empresa salva."); route();
   };
-  $("#relYuri").onclick = () => relatorioYuri(mes, entradasMes, r, pctStr || 0);
+  $("#relYuri").onclick = () => relatorioYuri(periodoLabel, entradasMes, r, pctStr || 0);
   $$("[data-del]").forEach((b) => (b.onclick = async () => {
     if (await confirmDialog("Excluir lançamento?")) { await db.financeiro.remove(b.dataset.del); toast("Excluído."); route(); }
   }));
 }
 
 // Abre uma janela imprimível com o fechamento do mês para o Yuri.
-function relatorioYuri(mes, entradas, r, pct) {
+function relatorioYuri(periodoLabel, entradas, r, pct) {
   const linhas = entradas
     .slice()
     .sort((a, b) => String(a.data).localeCompare(String(b.data)))
@@ -1133,10 +1202,9 @@ function relatorioYuri(mes, entradas, r, pct) {
         <td style="text-align:right">${money(l.valor)}</td></tr>`
     )
     .join("");
-  const [a, m] = mes.split("-");
   const w = window.open("", "_blank", "width=820,height=900");
   w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"/>
-    <title>Relatório ${m}/${a} — Top Line</title>
+    <title>Relatório ${periodoLabel} — Top Line</title>
     <style>
       body{font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;color:#111;padding:32px;max-width:760px;margin:auto}
       h1{font-size:20px;margin:0} h2{font-size:15px;margin:24px 0 8px}
@@ -1147,7 +1215,7 @@ function relatorioYuri(mes, entradas, r, pct) {
       .tot{text-align:right} .foot{margin-top:28px;color:#888;font-size:12px}
       @media print{button{display:none}}
     </style></head><body>
-    <h1>Top Line Higienizações — Fechamento ${m}/${a}</h1>
+    <h1>Top Line Higienizações — Fechamento ${periodoLabel}</h1>
     <p class="muted">Distribuição de lucro sobre as entradas do mês. Gerado em ${dateBR(today())}.</p>
     <div class="boxes">
       <div class="box"><span>Total de entradas</span><strong>${money(r.total)}</strong></div>
