@@ -1,7 +1,7 @@
-import * as db from "./db.js";
-import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js";
-import { renderNovoRegistro } from "./novo.js";
-import { renderRelatorios } from "./relatorios.js";
+import * as db from "./db.js?v=1.3";
+import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=1.3";
+import { renderNovoRegistro } from "./novo.js?v=1.3";
+import { renderRelatorios } from "./relatorios.js?v=1.3";
 
 const MENU = [
   ["dashboard", "🏠", "Início"],
