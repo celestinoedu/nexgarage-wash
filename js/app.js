@@ -1,7 +1,7 @@
-import * as db from "./db.js?v=1.7";
-import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=1.7";
-import { renderNovoRegistro } from "./novo.js?v=1.7";
-import { renderRelatorios } from "./relatorios.js?v=1.7";
+import * as db from "./db.js?v=1.8";
+import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=1.8";
+import { renderNovoRegistro } from "./novo.js?v=1.8";
+import { renderRelatorios } from "./relatorios.js?v=1.8";
 
 const MENU = [
   ["dashboard", "🏠", "Início"],
@@ -18,7 +18,7 @@ const MENU = [
 
 const state = { session: null };
 
-const APP_VERSION = "1.7";
+const APP_VERSION = "1.8";
 
 // Rodapé com dados da desenvolvedora + versão.
 function footerHTML() {
@@ -1201,7 +1201,7 @@ async function viewFinanceiro() {
       <div class="grid-2 finance-single-grid">
         ${card(`
           <div class="card-head"><h3>💰 Montante a receber (${label})</h3>
-            <button class="btn small" id="relYuri">📄 Relatório p/ Yuri</button></div>
+            <button class="btn small" id="relFechamento">📄 Relatório de fechamento</button></div>
           <p class="muted small">Cada sócio recebe conforme a base (Rennan 40% / Yuri 60% na base antiga; 50/50 nas demais); a % da empresa sai por cima. No final, as <strong>saídas do período são divididas 50/50</strong> e abatidas de cada sócio.</p>
           <div class="row gap" style="align-items:flex-end;margin-bottom:12px">
             <label style="flex:0 0 140px">% da empresa
@@ -1240,7 +1240,7 @@ async function viewFinanceiro() {
       await db.config.set("empresa_pct", v);
       toast("% da empresa salva."); route();
     };
-    $("#relYuri").onclick = () => relatorioYuri(label, entP, r, pctStr || 0);
+    $("#relFechamento").onclick = () => relatorioFechamento(label, itens, r, pctStr || 0);
     $$('[data-extrato]').forEach((b) => {
       const abrir = () => extratoDistribuicao(b.dataset.extrato, itens, r, pctStr || 0, label);
       b.onclick = abrir;
@@ -1287,32 +1287,41 @@ function extratoDistribuicao(socio, itens, r, pctLabel, periodoLabel) {
     </table></div>`, { wide: true });
 }
 
-// Abre uma janela imprimível com o fechamento do mês para o Yuri.
-function relatorioYuri(periodoLabel, entradas, r, pct) {
-  const linhas = entradas
-    .slice()
-    .sort((a, b) => String(a.data).localeCompare(String(b.data)))
-    .map(
-      (l) => `<tr><td>${dateBR(l.data)}</td><td>${esc(l.descricao || "")}</td>
-        <td style="text-align:center">${l.base_antiga ? "40/60" : "50/50"}</td>
-        <td style="text-align:right">${money(l.valor)}</td></tr>`
-    )
-    .join("");
-  const w = window.open("", "_blank", "width=820,height=900");
+// Abre uma janela imprimível com o fechamento geral do período:
+// divisão de cada sócio detalhada por serviço (estratificada) e consolidada.
+function relatorioFechamento(periodoLabel, itens, r, pct) {
+  const rows = itens.slice().sort((a, b) => String(a.data).localeCompare(String(b.data)));
+  const linhas = rows.map((l) => {
+    const a = l.atendimento;
+    const titulo = a ? ((a.tipo === "PARCEIRO" ? a.parceiros?.nome : a.clientes?.nome) || a.veiculo || "Serviço") : (l.descricao || "Entrada avulsa");
+    const sub = a ? (a.servicos || l.descricao || "") : "";
+    const desc = sub ? `${titulo} — ${sub}` : titulo;
+    return `<tr>
+      <td>${dateBR(l.data)}</td>
+      <td>${esc(desc)}</td>
+      <td style="text-align:center">${l.base_antiga ? "40/60" : "50/50"}</td>
+      <td class="tot">${money(l.recebido)}</td>
+      <td class="tot">${money(l.empresa)}</td>
+      <td class="tot">${money(l.rennan)}</td>
+      <td class="tot">${money(l.yuri)}</td>
+    </tr>`;
+  }).join("");
+  const w = window.open("", "_blank", "width=940,height=940");
   w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"/>
-    <title>Relatório ${periodoLabel} — Top Line</title>
+    <title>Fechamento ${periodoLabel} — Top Line</title>
     <style>
-      body{font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;color:#111;padding:32px;max-width:760px;margin:auto}
+      body{font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;color:#111;padding:32px;max-width:900px;margin:auto}
       h1{font-size:20px;margin:0} h2{font-size:15px;margin:24px 0 8px}
       .muted{color:#666} table{width:100%;border-collapse:collapse;margin-top:8px}
       th,td{padding:7px 8px;border-bottom:1px solid #ddd;font-size:13px} th{text-align:left;background:#f4f6fa}
       .boxes{display:flex;gap:12px;margin-top:10px} .box{flex:1;border:1px solid #ddd;border-radius:10px;padding:14px}
       .box span{color:#666;font-size:12px;display:block} .box strong{font-size:18px}
       .tot{text-align:right} .foot{margin-top:28px;color:#888;font-size:12px}
+      tfoot td{background:#fafbfe} tr.sum td{border-top:2px solid #cbd5e1}
       @media print{button{display:none}}
     </style></head><body>
     <h1>Top Line Higienizações — Fechamento ${periodoLabel}</h1>
-    <p class="muted">Distribuição de lucro sobre o lucro líquido (entradas − saídas) do período. Gerado em ${dateBR(today())}.</p>
+    <p class="muted">Relatório geral de fechamento. Divisão de cada sócio, detalhada por serviço e consolidada. Gerado em ${dateBR(today())}.</p>
     <div class="boxes">
       <div class="box"><span>Entradas (bruto)</span><strong>${money(r.total)}</strong></div>
       <div class="box"><span>(−) Saídas</span><strong>${money(r.saidas)}</strong></div>
@@ -1320,20 +1329,33 @@ function relatorioYuri(periodoLabel, entradas, r, pct) {
     </div>
     <div class="boxes">
       <div class="box"><span>Empresa (${pct}%)</span><strong>${money(r.empresa)}</strong></div>
-      <div class="box"><span>Rennan</span><strong>${money(r.rennan)}</strong></div>
-      <div class="box"><span>Yuri</span><strong>${money(r.yuri)}</strong></div>
+      <div class="box"><span>Rennan a receber</span><strong>${money(r.rennan)}</strong></div>
+      <div class="box"><span>Yuri a receber</span><strong>${money(r.yuri)}</strong></div>
     </div>
-    <h2>Composição</h2>
+
+    <h2>Divisão consolidada</h2>
     <table><tbody>
       <tr><td>Entradas base antiga (40/60)</td><td class="tot">${money(r.base)}</td></tr>
       <tr><td>Entradas demais (50/50)</td><td class="tot">${money(r.comum)}</td></tr>
-      <tr><td>(−) Saídas do período (divididas 50/50 entre os sócios)</td><td class="tot">${money(r.saidas)}</td></tr>
+      <tr><td>Parte da empresa (${pct}%)</td><td class="tot">${money(r.empresa)}</td></tr>
+      <tr><td>Montante bruto Rennan</td><td class="tot">${money(r.rennanBruto)}</td></tr>
+      <tr><td>Montante bruto Yuri</td><td class="tot">${money(r.yuriBruto)}</td></tr>
+      <tr><td>(−) Saídas do período (divididas 50/50)</td><td class="tot">${money(r.saidas)}</td></tr>
       <tr><td>50% das saídas por sócio</td><td class="tot">${money(r.metadeSaidas)}</td></tr>
-      <tr><td><strong>Lucro líquido</strong></td><td class="tot"><strong>${money(r.liquido)}</strong></td></tr>
+      <tr class="sum"><td><strong>Rennan a receber</strong></td><td class="tot"><strong>${money(r.rennan)}</strong></td></tr>
+      <tr class="sum"><td><strong>Yuri a receber</strong></td><td class="tot"><strong>${money(r.yuri)}</strong></td></tr>
     </tbody></table>
-    <h2>Entradas do mês (${entradas.length})</h2>
-    <table><thead><tr><th>Data</th><th>Descrição</th><th style="text-align:center">Divisão</th><th class="tot">Valor</th></tr></thead>
-      <tbody>${linhas || '<tr><td colspan="4" class="muted">Sem entradas no mês.</td></tr>'}</tbody></table>
+
+    <h2>Detalhamento por serviço (${rows.length})</h2>
+    <table>
+      <thead><tr><th>Data</th><th>Descrição</th><th style="text-align:center">Regra</th><th class="tot">Recebido</th><th class="tot">Empresa</th><th class="tot">Rennan</th><th class="tot">Yuri</th></tr></thead>
+      <tbody>${linhas || '<tr><td colspan="7" class="muted">Sem entradas no período.</td></tr>'}</tbody>
+      <tfoot>
+        <tr class="sum"><td colspan="3"><strong>Montante bruto (total)</strong></td><td class="tot"><strong>${money(r.total)}</strong></td><td class="tot"><strong>${money(r.empresa)}</strong></td><td class="tot"><strong>${money(r.rennanBruto)}</strong></td><td class="tot"><strong>${money(r.yuriBruto)}</strong></td></tr>
+        <tr><td colspan="5">(−) 50% das saídas do período</td><td class="tot">${money(r.metadeSaidas)}</td><td class="tot">${money(r.metadeSaidas)}</td></tr>
+        <tr class="sum"><td colspan="5"><strong>Total a receber por sócio</strong></td><td class="tot"><strong>${money(r.rennan)}</strong></td><td class="tot"><strong>${money(r.yuri)}</strong></td></tr>
+      </tfoot>
+    </table>
     <p class="foot">Gerado pelo sistema Top Line Higienizações.</p>
     <button onclick="window.print()" style="margin-top:20px;padding:10px 18px;border:none;border-radius:8px;background:#2f7cff;color:#fff;font-weight:600;cursor:pointer">Imprimir / Salvar PDF</button>
     </body></html>`);
