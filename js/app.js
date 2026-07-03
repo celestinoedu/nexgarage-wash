@@ -1,7 +1,7 @@
-import * as db from "./db.js?v=1.5";
-import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=1.5";
-import { renderNovoRegistro } from "./novo.js?v=1.5";
-import { renderRelatorios } from "./relatorios.js?v=1.5";
+import * as db from "./db.js?v=1.6";
+import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=1.6";
+import { renderNovoRegistro } from "./novo.js?v=1.6";
+import { renderRelatorios } from "./relatorios.js?v=1.6";
 
 const MENU = [
   ["dashboard", "🏠", "Início"],
@@ -18,7 +18,7 @@ const MENU = [
 
 const state = { session: null };
 
-const APP_VERSION = "1.5";
+const APP_VERSION = "1.6";
 
 // Rodapé com dados da desenvolvedora + versão.
 function footerHTML() {
@@ -240,7 +240,7 @@ async function viewDashboard() {
   const semPresenca = ativos.filter((f) => !lancados.has(f.id));
   const proximos = agenda.filter((a) => a.status === "AGENDADO" && String(a.data).slice(0, 10) >= hoje);
 
-  const opor = (oportRaw || []).filter((o) => o.dias_sem_lavar >= 15);
+  const opor = (oportRaw || []).filter((o) => o.dias_sem_lavar >= 29);
 
   // Últimos atendimentos: considera os últimos 29 dias.
   const limite29 = daysAgo(29);
@@ -267,13 +267,8 @@ async function viewDashboard() {
       <button class="btn small primary" id="novaAgendaInicio" style="margin-top:10px">+ Agendar lavagem</button>
     `)}
 
-    ${collapsibleCard("ultimos", `<h3>🕒 Últimos atendimentos</h3><span class="badge">${ultimos29.length}</span>`, `
-      <p class="muted small">Atendimentos dos últimos 29 dias.</p>
-      ${tableAtend(ultimos29)}
-    `)}
-
     ${collapsibleCard("oportunidades", `<h3>🎯 Oportunidades</h3><span class="badge">${opor.length}</span>`, `
-      <p class="muted small">Clientes há 15+ dias sem lavar — hora de chamar de volta.</p>
+      <p class="muted small">Clientes há 29+ dias sem lavar — hora de chamar de volta.</p>
       <div class="list opor-grid">
         ${
           opor.length
@@ -293,6 +288,11 @@ async function viewDashboard() {
             : `<div class="empty">Nenhuma oportunidade no momento 🎉</div>`
         }
       </div>
+    `)}
+
+    ${collapsibleCard("ultimos", `<h3>🕒 Últimos atendimentos</h3><span class="badge">${ultimos29.length}</span>`, `
+      <p class="muted small">Atendimentos dos últimos 29 dias.</p>
+      ${tableAtend(ultimos29)}
     `)}`;
 
   bindAtendEdits(ats);
