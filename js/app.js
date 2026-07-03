@@ -1,7 +1,7 @@
-import * as db from "./db.js?v=1.4";
-import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=1.4";
-import { renderNovoRegistro } from "./novo.js?v=1.4";
-import { renderRelatorios } from "./relatorios.js?v=1.4";
+import * as db from "./db.js?v=1.5";
+import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=1.5";
+import { renderNovoRegistro } from "./novo.js?v=1.5";
+import { renderRelatorios } from "./relatorios.js?v=1.5";
 
 const MENU = [
   ["dashboard", "🏠", "Início"],
@@ -18,7 +18,7 @@ const MENU = [
 
 const state = { session: null };
 
-const APP_VERSION = "1.4";
+const APP_VERSION = "1.5";
 
 // Rodapé com dados da desenvolvedora + versão.
 function footerHTML() {
@@ -1065,7 +1065,8 @@ async function viewFinanceiro() {
   const r = calcRateio(entradasMes, saidas, pct);
   const totalEntMes = r.total;
   const atsMap = Object.fromEntries(ats.map((a) => [a.id, a]));
-  const rateioServicos = entradasMes.filter((l) => l.atendimento_id).map((l) => {
+  // Detalhamento por entrada (inclui avulsas) — base do extrato de cada sócio.
+  const distItens = entradasMes.map((l) => {
     const valor = Number(l.valor || 0);
     const saidaServ = totalEntMes > 0 ? saidas * (valor / totalEntMes) : 0;
     const liquidoServ = valor - saidaServ;
@@ -1077,6 +1078,7 @@ async function viewFinanceiro() {
       yuri: distribuivel * (l.base_antiga ? 0.60 : 0.50),
     };
   });
+  const rateioServicos = distItens.filter((l) => l.atendimento_id);
 
   // Fechamento diário reconstruído dos atendimentos e movimentos do caixa.
   const dias = {};
@@ -1137,9 +1139,10 @@ async function viewFinanceiro() {
         </div>
         <div class="split split-3">
           <div class="split-box"><span>Empresa (${esc(pctStr || 0)}%)</span><strong>${money(r.empresa)}</strong></div>
-          <div class="split-box"><span>Rennan</span><strong>${money(r.rennan)}</strong></div>
-          <div class="split-box"><span>Yuri</span><strong>${money(r.yuri)}</strong></div>
-        </div>`)}
+          <div class="split-box clickable" data-extrato="rennan" role="button" tabindex="0" title="Ver extrato do Rennan"><span>Rennan 🔍</span><strong>${money(r.rennan)}</strong></div>
+          <div class="split-box clickable" data-extrato="yuri" role="button" tabindex="0" title="Ver extrato do Yuri"><span>Yuri 🔍</span><strong>${money(r.yuri)}</strong></div>
+        </div>
+        <p class="muted small" style="margin-top:8px">Clique em <strong>Rennan</strong> ou <strong>Yuri</strong> para ver o extrato detalhado do que compõe cada valor.</p>`)}
     </div>
 
     ${card(`
@@ -1203,9 +1206,46 @@ async function viewFinanceiro() {
     toast("% da empresa salva."); route();
   };
   $("#relYuri").onclick = () => relatorioYuri(periodoLabel, entradasMes, r, pctStr || 0);
+  $$('[data-extrato]').forEach((b) => {
+    const abrir = () => extratoDistribuicao(b.dataset.extrato, distItens, r, pctStr || 0);
+    b.onclick = abrir;
+    b.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); } };
+  });
   $$("[data-del]").forEach((b) => (b.onclick = async () => {
     if (await confirmDialog("Excluir lançamento?")) { await db.financeiro.remove(b.dataset.del); toast("Excluído."); route(); }
   }));
+}
+
+// Extrato detalhado do que compõe o valor de um sócio na distribuição do mês.
+function extratoDistribuicao(socio, itens, r, pctLabel) {
+  const nome = socio === "yuri" ? "Yuri" : "Rennan";
+  const total = socio === "yuri" ? r.yuri : r.rennan;
+  const pctOf = (l) => (l.base_antiga ? (socio === "yuri" ? "60%" : "40%") : "50%");
+  const rows = itens.slice().sort((a, b) => String(a.data).localeCompare(String(b.data)));
+  const linhas = rows.map((l) => {
+    const a = l.atendimento;
+    const titulo = a ? ((a.tipo === "PARCEIRO" ? a.parceiros?.nome : a.clientes?.nome) || a.veiculo || "Serviço") : (l.descricao || "Entrada avulsa");
+    const sub = a ? (a.servicos || l.descricao || "") : "";
+    const valSocio = socio === "yuri" ? l.yuri : l.rennan;
+    return `<tr>
+      <td>${dateBR(l.data)}</td>
+      <td><strong>${esc(titulo)}</strong>${sub ? `<br><small class="muted">${esc(sub)}</small>` : ""}</td>
+      <td>${l.base_antiga ? '<span class="tag yuri">40/60</span>' : '<span class="tag split50">50/50</span>'}</td>
+      <td class="r">${money(l.recebido)}</td>
+      <td class="r warn-txt">${money(l.saidaServ)}</td>
+      <td class="r">${money(l.liquidoServ)}</td>
+      <td class="r">${pctOf(l)}</td>
+      <td class="r"><strong>${money(valSocio)}</strong></td>
+    </tr>`;
+  }).join("");
+  const notaPct = Number(pctLabel) ? ` (após ${esc(pctLabel)}% da empresa)` : "";
+  openModal(`Extrato — ${nome}`, `
+    <p class="muted small">Em cada entrada, as saídas do período são rateadas pelo valor recebido; sobre o líquido${notaPct} aplica-se o percentual do ${nome} conforme a base (base antiga = ${socio === "yuri" ? "60%" : "40%"}, base nova = 50%).</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Data</th><th>Cliente / serviço</th><th>Regra</th><th class="r">Recebido</th><th class="r">(−) Saídas</th><th class="r">Líquido</th><th class="r">% ${nome}</th><th class="r">${nome}</th></tr></thead>
+      <tbody>${linhas || `<tr><td colspan="8" class="empty small">Sem entradas no período.</td></tr>`}</tbody>
+      <tfoot><tr><td colspan="7"><strong>Total ${nome}</strong></td><td class="r"><strong>${money(total)}</strong></td></tr></tfoot>
+    </table></div>`, { wide: true });
 }
 
 // Abre uma janela imprimível com o fechamento do mês para o Yuri.

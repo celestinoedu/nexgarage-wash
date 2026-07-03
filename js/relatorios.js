@@ -1,6 +1,6 @@
 // Central de relatórios em Excel (.xlsx).
-import * as db from "./db.js?v=1.4";
-import { $, $$, today, toast } from "./ui.js?v=1.4";
+import * as db from "./db.js?v=1.5";
+import { $, $$, today, toast } from "./ui.js?v=1.5";
 
 const XLSX_URL = "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs";
 const MOEDA = 'R$ #,##0.00';
