@@ -1,7 +1,7 @@
-import * as db from "./db.js?v=1.8";
-import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=1.8";
-import { renderNovoRegistro } from "./novo.js?v=1.8";
-import { renderRelatorios } from "./relatorios.js?v=1.8";
+import * as db from "./db.js?v=1.9";
+import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=1.9";
+import { renderNovoRegistro } from "./novo.js?v=1.9";
+import { renderRelatorios } from "./relatorios.js?v=1.9";
 
 const MENU = [
   ["dashboard", "🏠", "Início"],
@@ -18,7 +18,7 @@ const MENU = [
 
 const state = { session: null };
 
-const APP_VERSION = "1.8";
+const APP_VERSION = "1.9";
 
 // Rodapé com dados da desenvolvedora + versão.
 function footerHTML() {
@@ -860,7 +860,10 @@ async function viewPresenca() {
     <div class="card">
       <div class="card-head">
         <h3>Lançar presença</h3>
-        <label class="inline-date">Dia <input type="date" id="presData" value="${ps.data}" max="${today()}"/></label>
+        <div class="row gap" style="align-items:center">
+          <button class="btn small danger" id="faltaRetro">+ Falta retroativa</button>
+          <label class="inline-date">Dia <input type="date" id="presData" value="${ps.data}" max="${today()}"/></label>
+        </div>
       </div>
       <div id="marcar" class="list"></div>
     </div>
@@ -891,6 +894,45 @@ async function viewPresenca() {
       route();
     }
   };
+
+  function formFaltaRetroativa() {
+    const ontem = daysAgo(1);
+    const { close } = openModal("Lançar falta retroativa", `
+      <form id="fFaltaRetro" class="form">
+        <label>Colaborador
+          <select name="funcionario_id" required>
+            <option value="">Selecione</option>
+            ${funcs.map((f) => `<option value="${f.id}">${esc(f.nome)}</option>`).join("")}
+          </select>
+        </label>
+        <label>Data da falta
+          <input name="data" type="date" value="${ontem}" max="${ontem}" required />
+        </label>
+        <p class="muted small">Use para registrar faltas de dias anteriores a hoje. Se já houver presença nessa data, o registro será alterado para falta.</p>
+        <div class="row gap end">
+          <button class="btn ghost" type="button" data-cancel>Cancelar</button>
+          <button class="btn danger" type="submit">Registrar falta</button>
+        </div>
+      </form>`);
+    $("[data-cancel]").onclick = close;
+    $("#fFaltaRetro").onsubmit = async (e) => {
+      e.preventDefault();
+      const d = formData(e.target);
+      if (!d.data || d.data >= today()) {
+        toast("Escolha uma data anterior a hoje.", "err");
+        return;
+      }
+      try {
+        await db.presenca.upsert({ data: d.data, funcionario_id: d.funcionario_id, status: "FALTA", hora: null });
+        ps.data = d.data;
+        $("#presData").value = d.data;
+        toast("Falta retroativa registrada.");
+        close();
+        renderMarcar();
+        renderHist();
+      } catch (err) { toast(err.message, "err"); }
+    };
+  }
 
   async function renderMarcar() {
     const host = $("#marcar");
@@ -972,6 +1014,7 @@ async function viewPresenca() {
   }
 
   $("#presData").onchange = (e) => { ps.data = e.target.value || today(); renderMarcar(); };
+  $("#faltaRetro").onclick = formFaltaRetroativa;
   $("#presFiltro").onchange = (e) => { ps.filtro = e.target.value; renderHist(); };
   renderMarcar();
   renderHist();
