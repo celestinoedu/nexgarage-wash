@@ -1071,7 +1071,7 @@ const formaKey = (f) => {
 
 // Divisão do período: primeiro calcula o montante a receber de cada sócio pelas regras
 // (empresa % por cima; restante Rennan 40% / Yuri 60% na base antiga, 50/50 nas demais).
-// Depois as saídas do período são divididas 50/50 e abatidas de cada sócio.
+// Depois as saídas seguem a proporção consolidada dos sócios no período.
 function calcRateio(entradasList, saidas, pct) {
   const base = entradasList.filter((l) => l.base_antiga).reduce((s, l) => s + Number(l.valor || 0), 0);
   const comum = entradasList.filter((l) => !l.base_antiga).reduce((s, l) => s + Number(l.valor || 0), 0);
@@ -1081,12 +1081,17 @@ function calcRateio(entradasList, saidas, pct) {
   const restoComum = comum * (1 - pct);
   const rennanBruto = restoBase * 0.40 + restoComum * 0.50;
   const yuriBruto = restoBase * 0.60 + restoComum * 0.50;
-  const metadeSaidas = saidas / 2; // 50% das saídas para cada sócio
+  const totalSocios = rennanBruto + yuriBruto;
+  // Sem entradas distribuíveis no período, mantém 50/50 para evitar uma proporção indefinida.
+  const rennanPct = totalSocios > 0 ? rennanBruto / totalSocios : 0.50;
+  const yuriPct = totalSocios > 0 ? yuriBruto / totalSocios : 0.50;
+  const saidasRennan = saidas * rennanPct;
+  const saidasYuri = saidas * yuriPct;
   return {
-    base, comum, total, saidas, metadeSaidas, empresa,
+    base, comum, total, saidas, empresa, rennanPct, yuriPct, saidasRennan, saidasYuri,
     rennanBruto, yuriBruto,
-    rennan: rennanBruto - metadeSaidas,
-    yuri: yuriBruto - metadeSaidas,
+    rennan: rennanBruto - saidasRennan,
+    yuri: yuriBruto - saidasYuri,
     liquido: total - saidas,
   };
 }
@@ -1245,7 +1250,7 @@ async function viewFinanceiro() {
         ${card(`
           <div class="card-head"><h3>💰 Montante a receber (${label})</h3>
             <button class="btn small" id="relFechamento">📄 Relatório de fechamento</button></div>
-          <p class="muted small">Cada sócio recebe conforme a base (Rennan 40% / Yuri 60% na base antiga; 50/50 nas demais); a % da empresa sai por cima. No final, as <strong>saídas do período são divididas 50/50</strong> e abatidas de cada sócio.</p>
+          <p class="muted small">A % da empresa sai primeiro. Do restante, clientes da <strong>base antiga</strong> são divididos em Rennan 40% / Yuri 60% e clientes da <strong>base nova</strong> em 50% / 50%. O peso consolidado dessas entradas define também o rateio proporcional das saídas do período.</p>
           <div class="row gap" style="align-items:flex-end;margin-bottom:12px">
             <label style="flex:0 0 140px">% da empresa
               <input id="empresaPct" type="number" min="0" max="100" step="1" value="${esc(pctStr || 0)}"/></label>
@@ -1261,12 +1266,12 @@ async function viewFinanceiro() {
             <div class="split-box clickable" data-extrato="rennan" role="button" tabindex="0" title="Ver extrato do Rennan"><span>Rennan 🔍</span><strong>${money(r.rennan)}</strong></div>
             <div class="split-box clickable" data-extrato="yuri" role="button" tabindex="0" title="Ver extrato do Yuri"><span>Yuri 🔍</span><strong>${money(r.yuri)}</strong></div>
           </div>
-          <p class="muted small" style="margin-top:8px">Cada sócio já está com 50% das saídas (${money(r.metadeSaidas)}) abatido. Clique em <strong>Rennan</strong> ou <strong>Yuri</strong> para o extrato do montante a receber.</p>`)}
+          <p class="muted small" style="margin-top:8px">Rateio das saídas neste período: <strong>Rennan ${(r.rennanPct * 100).toFixed(2)}%</strong> (${money(r.saidasRennan)}) e <strong>Yuri ${(r.yuriPct * 100).toFixed(2)}%</strong> (${money(r.saidasYuri)}). Esses percentuais refletem o mix de clientes das bases antiga e nova. Clique no sócio para ver o extrato.</p>`)}
       </div>
 
       ${card(`
         <div class="card-head"><h3>🧮 Montante por serviço (${label})</h3></div>
-        <p class="muted small">Montante bruto de cada serviço por sócio (antes de abater as saídas). A parte da empresa (${esc(pctStr || 0)}%) sai por cima; o restante segue 40/60 (base antiga) ou 50/50 (demais). As saídas são abatidas 50/50 no total, não por serviço.</p>
+        <p class="muted small">Montante bruto de cada serviço por sócio (antes de abater as saídas). A parte da empresa (${esc(pctStr || 0)}%) sai por cima; o restante segue 40/60 (base antiga) ou 50/50 (base nova). As saídas são rateadas pela proporção consolidada resultante: Rennan ${(r.rennanPct * 100).toFixed(2)}% e Yuri ${(r.yuriPct * 100).toFixed(2)}%.</p>
         <div class="table-wrap"><table>
           <thead><tr><th>Data</th><th>Cliente / serviço</th><th>Regra</th><th class="r">Recebido</th><th class="r">Empresa</th><th class="r">Rennan</th><th class="r">Yuri</th></tr></thead>
           <tbody>${servicos.length ? servicos.map((l) => {
@@ -1295,11 +1300,13 @@ async function viewFinanceiro() {
 }
 
 // Extrato do montante a receber de um sócio no período: soma dos serviços (bruto)
-// e o abatimento de 50% das saídas do período, deixando o total final explícito.
+// e o abatimento proporcional das saídas do período, deixando o total final explícito.
 function extratoDistribuicao(socio, itens, r, pctLabel, periodoLabel) {
   const nome = socio === "yuri" ? "Yuri" : "Rennan";
   const bruto = socio === "yuri" ? r.yuriBruto : r.rennanBruto;
   const total = socio === "yuri" ? r.yuri : r.rennan;
+  const socioPct = socio === "yuri" ? r.yuriPct : r.rennanPct;
+  const saidaSocio = socio === "yuri" ? r.saidasYuri : r.saidasRennan;
   const pctOf = (l) => (l.base_antiga ? (socio === "yuri" ? "60%" : "40%") : "50%");
   const rows = itens.slice().sort((a, b) => String(a.data).localeCompare(String(b.data)));
   const linhas = rows.map((l) => {
@@ -1318,13 +1325,13 @@ function extratoDistribuicao(socio, itens, r, pctLabel, periodoLabel) {
   }).join("");
   const notaPct = Number(pctLabel) ? ` (após ${esc(pctLabel)}% da empresa)` : "";
   openModal(`Montante a receber — ${nome}`, `
-    <p class="muted small">Período <strong>${esc(periodoLabel)}</strong>. Em cada serviço o ${nome} recebe o percentual da sua base${notaPct}. No final, abate-se <strong>50% das saídas do período</strong>.</p>
+    <p class="muted small">Período <strong>${esc(periodoLabel)}</strong>. Em cada serviço o ${nome} recebe o percentual da sua base${notaPct}. No final, as saídas são abatidas na proporção consolidada das entradas: <strong>${(socioPct * 100).toFixed(2)}%</strong> para ${nome}.</p>
     <div class="table-wrap"><table>
       <thead><tr><th>Data</th><th>Cliente / serviço</th><th>Regra</th><th class="r">Recebido</th><th class="r">% ${nome}</th><th class="r">${nome}</th></tr></thead>
       <tbody>${linhas || `<tr><td colspan="6" class="empty small">Sem entradas no período.</td></tr>`}</tbody>
       <tfoot>
         <tr><td colspan="5"><strong>Montante bruto (soma dos serviços)</strong></td><td class="r"><strong>${money(bruto)}</strong></td></tr>
-        <tr><td colspan="5">(−) 50% das saídas do período</td><td class="r warn-txt">${money(r.metadeSaidas)}</td></tr>
+        <tr><td colspan="5">(−) ${(socioPct * 100).toFixed(2)}% das saídas do período</td><td class="r warn-txt">${money(saidaSocio)}</td></tr>
         <tr><td colspan="5"><strong>Total a receber</strong></td><td class="r"><strong>${money(total)}</strong></td></tr>
       </tfoot>
     </table></div>`, { wide: true });
@@ -1383,8 +1390,9 @@ function relatorioFechamento(periodoLabel, itens, r, pct) {
       <tr><td>Parte da empresa (${pct}%)</td><td class="tot">${money(r.empresa)}</td></tr>
       <tr><td>Montante bruto Rennan</td><td class="tot">${money(r.rennanBruto)}</td></tr>
       <tr><td>Montante bruto Yuri</td><td class="tot">${money(r.yuriBruto)}</td></tr>
-      <tr><td>(−) Saídas do período (divididas 50/50)</td><td class="tot">${money(r.saidas)}</td></tr>
-      <tr><td>50% das saídas por sócio</td><td class="tot">${money(r.metadeSaidas)}</td></tr>
+      <tr><td>(−) Saídas do período (rateio proporcional ao mix das bases)</td><td class="tot">${money(r.saidas)}</td></tr>
+      <tr><td>Parte das saídas — Rennan (${(r.rennanPct * 100).toFixed(2)}%)</td><td class="tot">${money(r.saidasRennan)}</td></tr>
+      <tr><td>Parte das saídas — Yuri (${(r.yuriPct * 100).toFixed(2)}%)</td><td class="tot">${money(r.saidasYuri)}</td></tr>
       <tr class="sum"><td><strong>Rennan a receber</strong></td><td class="tot"><strong>${money(r.rennan)}</strong></td></tr>
       <tr class="sum"><td><strong>Yuri a receber</strong></td><td class="tot"><strong>${money(r.yuri)}</strong></td></tr>
     </tbody></table>
@@ -1395,7 +1403,7 @@ function relatorioFechamento(periodoLabel, itens, r, pct) {
       <tbody>${linhas || '<tr><td colspan="7" class="muted">Sem entradas no período.</td></tr>'}</tbody>
       <tfoot>
         <tr class="sum"><td colspan="3"><strong>Montante bruto (total)</strong></td><td class="tot"><strong>${money(r.total)}</strong></td><td class="tot"><strong>${money(r.empresa)}</strong></td><td class="tot"><strong>${money(r.rennanBruto)}</strong></td><td class="tot"><strong>${money(r.yuriBruto)}</strong></td></tr>
-        <tr><td colspan="5">(−) 50% das saídas do período</td><td class="tot">${money(r.metadeSaidas)}</td><td class="tot">${money(r.metadeSaidas)}</td></tr>
+        <tr><td colspan="5">(−) Saídas proporcionais (${(r.rennanPct * 100).toFixed(2)}% / ${(r.yuriPct * 100).toFixed(2)}%)</td><td class="tot">${money(r.saidasRennan)}</td><td class="tot">${money(r.saidasYuri)}</td></tr>
         <tr class="sum"><td colspan="5"><strong>Total a receber por sócio</strong></td><td class="tot"><strong>${money(r.rennan)}</strong></td><td class="tot"><strong>${money(r.yuri)}</strong></td></tr>
       </tfoot>
     </table>
