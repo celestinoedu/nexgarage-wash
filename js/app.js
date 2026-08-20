@@ -1,8 +1,8 @@
-import * as db from "./db.js?v=2.0.1";
-import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=2.0.1";
-import { renderNovoRegistro } from "./novo.js?v=2.0.1";
-import { renderRelatorios } from "./relatorios.js?v=2.0.1";
-import { renderConfiguracoes } from "./settings.js?v=2.0.1";
+import * as db from "./db.js?v=2.0.2";
+import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=2.0.2";
+import { renderNovoRegistro } from "./novo.js?v=2.0.2";
+import { renderRelatorios } from "./relatorios.js?v=2.0.2";
+import { renderConfiguracoes } from "./settings.js?v=2.0.2";
 
 const BASE_MENU = [
   ["dashboard", "🏠", "Início"],
@@ -579,14 +579,23 @@ async function viewAtendimentos() {
   $("#view").innerHTML = `
     <div class="toolbar">
       <input id="q" class="search" placeholder="Buscar por cliente, placa, OS…" />
+      <select id="atFiltro" class="mini">
+        <option value="TODOS">Todos os atendimentos</option>
+        <option value="PENDENTE">Somente pendentes</option>
+        <option value="PAGO">Somente pagos</option>
+      </select>
       <button class="btn primary" id="novo2">+ Novo Registro</button>
     </div>
     <div id="atTable">${tableAtend(list)}</div>`;
   $("#novo2").onclick = () => renderNovoRegistro({ onSaved: route });
   bindAtendEdits(list);
-  $("#q").oninput = (e) => {
-    const t = norm(e.target.value);
+
+  // Busca e status de pagamento são aplicados juntos.
+  const aplicar = () => {
+    const t = norm($("#q").value);
+    const status = $("#atFiltro").value;
     const f = list.filter((a) =>
+      (status === "TODOS" || (status === "PAGO" ? a.status_pg === "PAGO" : a.status_pg !== "PAGO")) &&
       [a.os_numero, a.placa, a.veiculo, a.servicos, a.clientes?.nome, a.parceiros?.nome]
         .map(norm)
         .some((x) => x.includes(t))
@@ -594,6 +603,8 @@ async function viewAtendimentos() {
     $("#atTable").innerHTML = tableAtend(f);
     bindAtendEdits(list);
   };
+  $("#q").oninput = aplicar;
+  $("#atFiltro").onchange = aplicar;
 }
 
 // ============================================================ AGENDA
