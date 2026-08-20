@@ -1,8 +1,8 @@
-import * as db from "./db.js?v=2.0";
-import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=2.0";
-import { renderNovoRegistro } from "./novo.js?v=2.0";
-import { renderRelatorios } from "./relatorios.js?v=2.0";
-import { renderConfiguracoes } from "./settings.js?v=2.0";
+import * as db from "./db.js?v=2.0.1";
+import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=2.0.1";
+import { renderNovoRegistro } from "./novo.js?v=2.0.1";
+import { renderRelatorios } from "./relatorios.js?v=2.0.1";
+import { renderConfiguracoes } from "./settings.js?v=2.0.1";
 
 const BASE_MENU = [
   ["dashboard", "🏠", "Início"],
@@ -24,7 +24,7 @@ const state = {
   permissions: null,
 };
 
-const APP_VERSION = "2.0";
+const APP_VERSION = "2.0.1";
 const menuItems = () =>
   state.permissions?.canManageAccount
     ? [...BASE_MENU, ["configuracoes", "⚙️", "Configurações"]]

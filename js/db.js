@@ -193,7 +193,15 @@ export const atendimentos = {
       .eq("store_id", storeId())
       .order("data", { ascending: false })
       .then(ok),
-  create: (row) => supabase.from("atendimentos").insert(withStore(row)).select().single().then(ok),
+  async create(row) {
+    const id = await supabase
+      .rpc("create_legacy_atendimento", {
+        p_store_id: storeId(),
+        p_atendimento: row,
+      })
+      .then(ok);
+    return { ...row, id, store_id: storeId() };
+  },
   update: (id, row) => scoped(supabase.from("atendimentos").update(row).eq("id", id)).select().single().then(ok),
   remove: (id) => scoped(supabase.from("atendimentos").delete().eq("id", id)).then(ok),
 };

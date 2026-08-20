@@ -1,5 +1,5 @@
-import * as db from "./db.js?v=2.0";
-import { $, $$, esc, openModal, toast } from "./ui.js?v=2.0";
+import * as db from "./db.js?v=2.0.1";
+import { $, $$, esc, openModal, toast } from "./ui.js?v=2.0.1";
 
 const accountRoleLabel = (role) =>
   role === "owner" ? "Proprietário" : role === "admin" ? "Administrador" : "Membro";

@@ -1,6 +1,6 @@
 // Fluxo "Novo Registro" — particular (busca por placa) ou parceiro.
-import * as db from "./db.js?v=2.0";
-import { $, $$, money, today, esc, norm, toast, openModal, closeModal, formData } from "./ui.js?v=2.0";
+import * as db from "./db.js?v=2.0.1";
+import { $, $$, money, today, esc, norm, toast, openModal, closeModal, formData } from "./ui.js?v=2.0.1";
 
 function proximoOS(ats) {
   let max = 0;
@@ -312,7 +312,7 @@ export async function renderNovoRegistro({ onSaved } = {}) {
       const valor = itensServicos.reduce((s, i) => s + i.valor - i.desconto, 0);
       const desconto = itensServicos.reduce((s, i) => s + i.desconto, 0);
 
-      const atend = await db.atendimentos.create({
+      await db.atendimentos.create({
         os_numero: osNum,
         data,
         tipo: st.tipo,
@@ -332,18 +332,8 @@ export async function renderNovoRegistro({ onSaved } = {}) {
         observacoes: obs,
       });
 
-      // Se já está pago, lança a entrada no financeiro
-      if (status === "PAGO") {
-        await db.financeiro.create({
-          data,
-          tipo: "ENTRADA",
-          atendimento_id: atend.id,
-          descricao: `${osNum} · ${servicosTxt}`,
-          valor,
-          forma_pgto: forma,
-          base_antiga: st.base_antiga,
-        });
-      }
+      // A entrada financeira dos atendimentos pagos é criada atomicamente
+      // pela função create_legacy_atendimento no Supabase.
       toast("Registro salvo!");
       close();
       onSaved && onSaved();
