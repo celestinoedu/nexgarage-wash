@@ -12,6 +12,8 @@ yarn-debug.log*
 yarn-error.log*
 dev-server*.log
 lite-server*.log
+legacy-server*.log
 .vercel/
 .playwright-cli/
 output/playwright/
+*.tsbuildinfo

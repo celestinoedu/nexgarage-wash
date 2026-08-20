@@ -1,9 +1,10 @@
-import * as db from "./db.js?v=1.9";
-import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=1.9";
-import { renderNovoRegistro } from "./novo.js?v=1.9";
-import { renderRelatorios } from "./relatorios.js?v=1.9";
+import * as db from "./db.js?v=2.0";
+import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=2.0";
+import { renderNovoRegistro } from "./novo.js?v=2.0";
+import { renderRelatorios } from "./relatorios.js?v=2.0";
+import { renderConfiguracoes } from "./settings.js?v=2.0";
 
-const MENU = [
+const BASE_MENU = [
   ["dashboard", "🏠", "Início"],
   ["atendimentos", "🧾", "Atendimentos"],
   ["agenda", "📅", "Agenda"],
@@ -16,9 +17,18 @@ const MENU = [
   ["relatorios", "📊", "Relatórios"],
 ];
 
-const state = { session: null };
+const state = {
+  session: null,
+  stores: [],
+  store: null,
+  permissions: null,
+};
 
-const APP_VERSION = "1.9";
+const APP_VERSION = "2.0";
+const menuItems = () =>
+  state.permissions?.canManageAccount
+    ? [...BASE_MENU, ["configuracoes", "⚙️", "Configurações"]]
+    : BASE_MENU;
 
 // Rodapé com dados da desenvolvedora + versão.
 function footerHTML() {
@@ -50,10 +60,37 @@ async function boot() {
   if (!db.isConfigured) return renderSetup();
   state.session = await db.auth.session();
   db.auth.onChange((s) => {
-    state.session = s;
-    s ? renderShell() : renderLogin();
+    if (s) return;
+    state.session = null;
+    state.stores = [];
+    state.store = null;
+    state.permissions = null;
+    db.access.setActiveStore(null);
+    renderLogin();
   });
-  state.session ? renderShell() : renderLogin();
+  if (state.session) await prepareStore(false);
+  else renderLogin();
+}
+
+async function prepareStore(forcePicker = false) {
+  try {
+    state.stores = await db.access.stores();
+    if (!state.stores.length) return renderNoAccess();
+    const savedId = forcePicker ? null : localStorage.getItem("tl_active_store");
+    const savedStore = state.stores.find((item) => item.id === savedId);
+    if (savedStore) return selectStore(savedStore);
+    renderStorePicker();
+  } catch (error) {
+    console.error(error);
+    renderNoAccess("Não foi possível carregar as lojas permitidas.");
+  }
+}
+
+async function selectStore(store) {
+  db.access.setActiveStore(store);
+  state.store = store;
+  state.permissions = await db.access.permissions(store);
+  renderShell();
 }
 
 function renderSetup() {
@@ -78,6 +115,7 @@ function renderLogin() {
         <label>E-mail<input name="email" type="email" required autocomplete="username" /></label>
         <label>Senha<input name="password" type="password" required autocomplete="current-password" /></label>
         <button class="btn primary block" type="submit">Entrar</button>
+        <button class="btn ghost block" id="createLogin" type="button">Primeiro acesso: criar login</button>
         <p class="err" id="loginErr"></p>
       </form>
       ${footerHTML()}
@@ -85,19 +123,116 @@ function renderLogin() {
   $("#loginForm").onsubmit = async (e) => {
     e.preventDefault();
     const { email, password } = formData(e.target);
-    const { error } = await db.auth.signIn(email, password);
-    if (error) $("#loginErr").textContent = "E-mail ou senha inválidos.";
+    const button = e.target.querySelector("button[type=submit]");
+    button.disabled = true;
+    button.textContent = "Validando…";
+    db.access.setActiveStore(null);
+    const { data, error } = await db.auth.signIn(email, password);
+    if (error) {
+      $("#loginErr").textContent = "E-mail ou senha inválidos.";
+      button.disabled = false;
+      button.textContent = "Entrar";
+      return;
+    }
+    state.session = data.session;
+    await prepareStore(true);
+  };
+  $("#createLogin").onclick = renderSignUp;
+}
+
+function renderSignUp() {
+  const { close } = openModal("Criar login", `
+    <form class="form" id="signUpForm">
+      <p class="muted small">Crie seu login. Depois, o proprietário ou administrador deverá liberar as lojas permitidas.</p>
+      <label>Nome completo<input name="full_name" required autocomplete="name" /></label>
+      <label>E-mail<input name="email" type="email" required autocomplete="email" /></label>
+      <label>Senha<input name="password" type="password" minlength="6" required autocomplete="new-password" /></label>
+      <p class="err" id="signUpError"></p>
+      <div class="row gap end"><button class="btn ghost" type="button" data-cancel>Cancelar</button><button class="btn primary" type="submit">Criar login</button></div>
+    </form>`);
+  $("[data-cancel]").onclick = close;
+  $("#signUpForm").onsubmit = async (event) => {
+    event.preventDefault();
+    const values = formData(event.target);
+    const submit = event.target.querySelector('[type="submit"]');
+    submit.disabled = true;
+    const { data, error } = await db.auth.signUp(values.email, values.password, values.full_name);
+    if (error) {
+      $("#signUpError").textContent = error.message.includes("already") ? "Este e-mail já possui login." : error.message;
+      submit.disabled = false;
+      return;
+    }
+    close();
+    if (data.session) {
+      state.session = data.session;
+      await prepareStore(true);
+    } else {
+      $("#loginErr").textContent = "Login criado. Confirme o e-mail e peça ao administrador para liberar sua loja.";
+    }
   };
 }
 
+function renderStorePicker() {
+  $("#app").innerHTML = `
+    <div class="auth">
+      <form class="auth-card" id="storeLoginForm">
+        <img class="brand-logo" src="assets/logo.png" alt="Top Line Higienizações" />
+        <div>
+          <h2>Selecionar loja</h2>
+          <p class="muted small">Escolha a unidade que deseja acessar neste login.</p>
+        </div>
+        <label>Loja
+          <select name="store_id" required>
+            ${state.stores.map((store) => `<option value="${esc(store.id)}">${esc(store.name)}${store.city ? ` · ${esc(store.city)}` : ""}</option>`).join("")}
+          </select>
+        </label>
+        <button class="btn primary block" type="submit">Acessar loja</button>
+        <button class="btn ghost block" id="storeLogout" type="button">Voltar</button>
+        <p class="err" id="storeErr"></p>
+      </form>
+      ${footerHTML()}
+    </div>`;
+  $("#storeLoginForm").onsubmit = async (event) => {
+    event.preventDefault();
+    const store = state.stores.find((item) => item.id === formData(event.target).store_id);
+    if (!store) return ($("#storeErr").textContent = "Selecione uma loja válida.");
+    try {
+      await selectStore(store);
+    } catch (error) {
+      console.error(error);
+      $("#storeErr").textContent = "Seu usuário não possui acesso a esta loja.";
+    }
+  };
+  $("#storeLogout").onclick = () => db.auth.signOut();
+}
+
+function renderNoAccess(message = "Seu login ainda não possui acesso a nenhuma loja.") {
+  $("#app").innerHTML = `
+    <div class="auth">
+      <div class="auth-card">
+        <img class="brand-logo" src="assets/logo.png" alt="Top Line Higienizações" />
+        <h2>Acesso pendente</h2>
+        <p class="muted">${esc(message)}</p>
+        <p class="small muted">Peça ao proprietário ou administrador para liberar sua loja.</p>
+        <button class="btn ghost block" id="noAccessLogout">Sair</button>
+      </div>
+      ${footerHTML()}
+    </div>`;
+  $("#noAccessLogout").onclick = () => db.auth.signOut();
+}
+
 function renderShell() {
+  const storeLogo = state.store?.logo_url || "assets/logo.png";
   $("#app").innerHTML = `
     <div class="shell">
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-brand-row">
-          <img class="brand-logo side" src="assets/logo.png" alt="Top Line Higienizações" />
+          <img class="brand-logo side" src="${esc(storeLogo)}" alt="${esc(state.store?.name || "Top Line Higienizações")}" />
           <button class="sidebar-collapse-btn" id="sidebarCollapse" title="Minimizar menu" aria-label="Minimizar menu">«</button>
         </div>
+        <button class="active-store" id="switchStore" title="Trocar loja">
+          <span>🏪</span><span><small>Loja ativa</small><strong>${esc(state.store?.name || "")}</strong></span><b>⌄</b>
+        </button>
         <nav id="nav"></nav>
         <div class="sidebar-bottom">
           <div class="row between" style="align-items:center;gap:10px">
@@ -119,7 +254,7 @@ function renderShell() {
       </main>
     </div>`;
 
-  $("#nav").innerHTML = MENU.map(
+  $("#nav").innerHTML = menuItems().map(
     ([id, ic, label]) => `<button class="nav-item" data-route="${id}" title="${label}"><span class="nav-icon">${ic}</span><span class="nav-label">${label}</span></button>`
   ).join("");
 
@@ -133,6 +268,7 @@ function renderShell() {
   $("#sidebarCollapse").onclick = () => setSidebarCollapsed(!document.body.classList.contains("sidebar-collapsed"));
   $("#themeToggle").onclick = toggleTheme;
   $("#logout").onclick = () => db.auth.signOut();
+  $("#switchStore").onclick = () => prepareStore(true);
   $("#novoBtn").onclick = () => renderNovoRegistro({ onSaved: () => route() });
   $("#menuBtn").onclick = () => document.body.classList.toggle("nav-open");
   $("#navBackdrop").onclick = () => document.body.classList.remove("nav-open");
@@ -154,6 +290,7 @@ const ROUTES = {
   servicos: viewServicos,
   financeiro: viewFinanceiro,
   relatorios: renderRelatorios,
+  configuracoes: renderConfiguracoes,
 };
 
 async function route() {
@@ -161,11 +298,17 @@ async function route() {
   const fn = ROUTES[id] || viewDashboard;
   document.body.classList.remove("nav-open");
   $$("[data-route]").forEach((b) => b.classList.toggle("active", b.dataset.route === id));
-  const item = MENU.find((m) => m[0] === id);
+  const item = menuItems().find((m) => m[0] === id);
   $("#pageTitle").textContent = item ? item[2] : "Início";
+  $("#novoBtn").style.display = id === "configuracoes" ? "none" : "";
   $("#view").innerHTML = `<div class="loading">Carregando…</div>`;
   try {
-    await fn();
+    await fn({
+      store: state.store,
+      stores: state.stores,
+      permissions: state.permissions,
+      onStoreChanged: () => prepareStore(false),
+    });
   } catch (e) {
     console.error(e);
     $("#view").innerHTML = `<div class="empty">Erro ao carregar: ${esc(e.message || e)}</div>`;

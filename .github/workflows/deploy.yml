@@ -20,24 +20,25 @@ jobs:
     steps:
       - name: Baixar código
         uses: actions/checkout@v4
-      - name: Preparar Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - name: Instalar dependências
-        run: npm ci
-      - name: Gerar site estático
-        run: npm run build
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      - name: Preparar versão legado TOP LINE
+        shell: bash
+        run: |
+          mkdir -p site
+          cp index.html styles.css .nojekyll site/
+          cp -R js assets site/
+          cp public/CNAME site/CNAME
+          cat > site/config.js <<EOF
+          window.LAVA_CONFIG = {
+            SUPABASE_URL: "${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}",
+            SUPABASE_ANON_KEY: "${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}",
+          };
+          EOF
       - name: Configurar GitHub Pages
         uses: actions/configure-pages@v5
       - name: Preparar artefato
         uses: actions/upload-pages-artifact@v3
         with:
-          path: out
+          path: site
 
   deploy:
     environment:
