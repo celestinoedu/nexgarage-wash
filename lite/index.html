@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NexGarage Lite</title>
+    <link rel="icon" href="/branding/favicon.png" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <img class="logo" src="/branding/logo.png" alt="NexGarage" />
+      <nav class="menu" id="menu"></nav>
+    </aside>
+
+    <main class="app">
+      <header class="topbar">
+        <button class="icon-button mobile-only" id="menuButton" aria-label="Abrir menu">☰</button>
+        <div>
+          <span class="eyebrow">LOTUS NEGOCIOS LTDA</span>
+          <h1 id="pageTitle">Painel</h1>
+        </div>
+        <button class="primary-action" data-view="new-order">+ Abrir OS</button>
+      </header>
+
+      <section id="view"></section>
+    </main>
+
+    <nav class="bottom-nav" id="bottomNav"></nav>
+    <script src="/app.js"></script>
+  </body>
+</html>

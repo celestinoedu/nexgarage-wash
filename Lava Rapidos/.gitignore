@@ -1,0 +1,8 @@
+# ⚠️ SEGURANÇA / LGPD — nada aqui pode ir para um repositório público.
+# A planilha e o seed contêm dados pessoais dos clientes (nomes, telefones, placas).
+
+DUH.xlsm
+**/seed.sql
+app/config.js
+
+# Caso publique no GitHub Pages, publique APENAS o conteúdo de app/ (sem config.js).

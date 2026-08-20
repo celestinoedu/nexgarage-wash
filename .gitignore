@@ -1,0 +1,17 @@
+node_modules/
+.next/
+out/
+dist/
+.env
+.env*.local
+.env.legacy*
+Lava Rapidos/backups/
+backups/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dev-server*.log
+lite-server*.log
+.vercel/
+.playwright-cli/
+output/playwright/
