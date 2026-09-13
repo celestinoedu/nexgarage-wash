@@ -1,8 +1,9 @@
 "use client";
 
-import { BarChart3, Banknote, LoaderCircle, Sparkles, Users } from "lucide-react";
+import { BarChart3, Banknote, LoaderCircle, Sparkles, Store, Users } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { DashboardCard } from "@/components/DashboardCard";
+import { StoreFilterBar } from "@/components/StoreScope";
 import { useStoreRows } from "@/hooks/useStoreRows";
 import { brl } from "@/lib/utils";
 
@@ -15,6 +16,12 @@ export default function ReportsPage() {
   const delivered = orders.rows.filter((item) => item.status === "delivered");
   const revenues = finance.rows.filter((item) => item.kind === "income" && item.paid_at).reduce((sum, item) => sum + Number(item.amount), 0);
   const expenses = finance.rows.filter((item) => item.kind === "expense" && item.paid_at).reduce((sum, item) => sum + Number(item.amount), 0);
+  const storeCounts = new Map<string, { count: number; value: number }>();
+  delivered.forEach((order) => {
+    const current = storeCounts.get(order.store_id) ?? { count: 0, value: 0 };
+    current.count += 1; current.value += Number(order.total); storeCounts.set(order.store_id, current);
+  });
+  const byStore = [...storeCounts.entries()].sort((a, b) => b[1].value - a[1].value);
   const serviceCounts = new Map<string, { count: number; value: number }>();
   const employeeCounts = new Map<string, { count: number; value: number }>();
   delivered.forEach((order) => {
@@ -25,8 +32,9 @@ export default function ReportsPage() {
   const team = [...employeeCounts.entries()].sort((a, b) => b[1].count - a[1].count).slice(0, 10);
   const average = delivered.length ? delivered.reduce((sum, item) => sum + Number(item.total), 0) / delivered.length : 0;
   const loading = orders.loading || finance.loading;
-  return <AppShell title="Relatórios">{loading ? <div className="grid min-h-64 place-items-center"><LoaderCircle className="animate-spin text-wash-700" /></div> : orders.error || finance.error ? <p className="rounded-xl bg-rose-50 p-4 text-sm font-semibold text-rose-700">{orders.error ?? finance.error}</p> : <>
+  return <AppShell title="Relatórios"><StoreFilterBar />{loading ? <div className="grid min-h-64 place-items-center"><LoaderCircle className="animate-spin text-wash-700" /></div> : orders.error || finance.error ? <p className="rounded-xl bg-rose-50 p-4 text-sm font-semibold text-rose-700">{orders.error ?? finance.error}</p> : <>
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><DashboardCard title="Atendimentos entregues" value={String(delivered.length)} icon={Sparkles} /><DashboardCard title="Ticket médio" value={brl(average)} icon={BarChart3} /><DashboardCard title="Receitas realizadas" value={brl(revenues)} icon={Banknote} tone="success" /><DashboardCard title="Resultado realizado" value={brl(revenues - expenses)} icon={Banknote} tone={revenues >= expenses ? "success" : "danger"} /></div>
+    {orders.consolidated ? <div className="mt-5"><Ranking title="Resultado por loja" icon={Store} rows={byStore.map(([storeId, data]) => ({ name: orders.storeName(storeId), detail: `${data.count} atendimentos entregues`, value: brl(data.value) }))} /></div> : null}
     <div className="mt-5 grid gap-5 xl:grid-cols-2"><Ranking title="Serviços mais realizados" icon={Sparkles} rows={services.map(([name, data]) => ({ name, detail: `${data.count} realizações`, value: brl(data.value) }))} /><Ranking title="Produção por colaborador" icon={Users} rows={team.map(([name, data]) => ({ name, detail: `${data.count} atendimentos`, value: brl(data.value) }))} /></div>
   </>}</AppShell>;
 }

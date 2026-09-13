@@ -20,6 +20,9 @@ jobs:
     steps:
       - name: Baixar código
         uses: actions/checkout@v4
+
+      # A raiz do domínio continua servindo a versão legado, que é a atual
+      # para quem ainda não optou pela nova.
       - name: Preparar versão legado TOP LINE
         shell: bash
         run: |
@@ -33,6 +36,33 @@ jobs:
             SUPABASE_ANON_KEY: "${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}",
           };
           EOF
+
+      - name: Instalar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      # A versão nova é publicada em /app, convivendo com o legado na mesma
+      # origem — é o que permite o alternador e a preferência compartilhada.
+      - name: Construir versão nova
+        env:
+          NEXT_PUBLIC_BASE_PATH: /app
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+        run: npm run build
+
+      - name: Publicar versão nova em /app
+        shell: bash
+        run: |
+          mkdir -p site/app
+          cp -R out/. site/app/
+          # O CNAME e o .nojekyll valem para o site inteiro, na raiz.
+          rm -f site/app/CNAME
+
       - name: Configurar GitHub Pages
         uses: actions/configure-pages@v5
       - name: Preparar artefato

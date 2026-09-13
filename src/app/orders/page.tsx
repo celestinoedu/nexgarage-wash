@@ -10,6 +10,7 @@ import {
   Search,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { StoreFilterBar, StoreTag } from "@/components/StoreScope";
 import { useStoreRows } from "@/hooks/useStoreRows";
 import { brl } from "@/lib/utils";
 
@@ -49,6 +50,17 @@ const kindLabel: Record<string, string> = {
   scheduled: "Agendado",
 };
 
+// Data e hora do atendimento, no formato curto usado nas listagens.
+function dateTimeBR(value: string) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
 export default function OrdersPage() {
   const { rows, loading, error } = useStoreRows<OrderRow>("service_orders", {
     select:
@@ -67,6 +79,7 @@ export default function OrdersPage() {
         </Link>
       }
     >
+      <StoreFilterBar />
       <div className="mb-4 grid gap-3 rounded-2xl border border-line bg-white p-4 shadow-soft sm:grid-cols-[1fr_auto]">
         <label className="relative">
           <Search
@@ -113,6 +126,10 @@ export default function OrdersPage() {
                   </span>
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-600">
                     {kindLabel[order.kind]}
+                  </span>
+                  <StoreTag storeId={order.store_id} />
+                  <span className="text-xs font-semibold text-slate-500">
+                    {dateTimeBR(order.created_at)}
                   </span>
                 </div>
                 <h2 className="mt-1 truncate font-extrabold">

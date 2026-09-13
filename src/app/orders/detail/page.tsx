@@ -18,6 +18,7 @@ import { brl } from "@/lib/utils";
 
 type Order = {
   id: string;
+  store_id: string;
   order_number: number;
   kind: string;
   status: string;
@@ -82,7 +83,8 @@ export default function OrderDetailRoute() {
 
 function OrderDetailPage() {
   const id = useSearchParams().get("id") ?? "";
-  const { currentStore } = useStore();
+  const { scopeStoreIds, consolidated, storeName } = useStore();
+  const storeIdsKey = scopeStoreIds.join(",");
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -91,20 +93,21 @@ function OrderDetailPage() {
 
   const load = useCallback(async () => {
     await Promise.resolve();
-    if (!supabase || !currentStore) return;
+    const storeIds = storeIdsKey ? storeIdsKey.split(",") : [];
+    if (!supabase || storeIds.length === 0) return;
     setLoading(true);
     const { data, error } = await supabase
       .from("service_orders")
       .select(
-        "id,order_number,kind,status,payment_status,payment_method,total,discount,notes,created_at,customers(name,whatsapp,phone),vehicles(plate,make,model,color,size),partners(name,phone),employees(name,role_name),service_order_items(id,description,quantity,unit_price,total)",
+        "id,store_id,order_number,kind,status,payment_status,payment_method,total,discount,notes,created_at,customers(name,whatsapp,phone),vehicles(plate,make,model,color,size),partners(name,phone),employees(name,role_name),service_order_items(id,description,quantity,unit_price,total)",
       )
       .eq("id", id)
-      .eq("store_id", currentStore.id)
+      .in("store_id", storeIds)
       .single();
     setMessage(error ? error.message : null);
     setOrder((data as Order | null) ?? null);
     setLoading(false);
-  }, [currentStore, id]);
+  }, [id, storeIdsKey]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
@@ -191,6 +194,11 @@ function OrderDetailPage() {
                   <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">
                     {kindLabel[order.kind]}
                   </span>
+                  {consolidated ? (
+                    <span className="rounded-full bg-wash-50 px-3 py-1 text-xs font-bold text-wash-800 ring-1 ring-inset ring-wash-200">
+                      {storeName(order.store_id)}
+                    </span>
+                  ) : null}
                 </div>
                 <h2 className="mt-3 text-2xl font-extrabold">{vehicleName}</h2>
                 <p className="text-slate-500">

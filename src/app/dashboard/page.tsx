@@ -16,6 +16,7 @@ import {
 import { AppShell } from "@/components/AppShell";
 import { DashboardCard } from "@/components/DashboardCard";
 import { useAuth } from "@/components/AuthProvider";
+import { StoreFilterBar, StoreTag } from "@/components/StoreScope";
 import { useStoreRows } from "@/hooks/useStoreRows";
 import { brl } from "@/lib/utils";
 
@@ -120,11 +121,15 @@ export default function DashboardPage() {
     ).length,
   }));
   const maxWeek = Math.max(...week.map((item) => item.value), 1);
+  // Sem nome cadastrado a saudação vira só "Olá!", em vez de "Olá, Olá!".
   const name =
     user?.user_metadata?.full_name?.split(" ")[0] ??
     user?.email?.split("@")[0] ??
-    "Olá";
+    "";
   const loading = orders.loading || finance.loading;
+  const scopeLabel = orders.consolidated
+    ? "nas lojas do filtro atual"
+    : "nesta loja";
 
   return (
     <AppShell
@@ -138,6 +143,7 @@ export default function DashboardPage() {
         </Link>
       }
     >
+      <StoreFilterBar />
       <section className="mb-6 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
         <div>
           <p className="text-sm font-semibold text-slate-500">
@@ -146,7 +152,7 @@ export default function DashboardPage() {
             )}
           </p>
           <h2 className="mt-1 text-2xl font-extrabold tracking-[-0.04em] text-ink">
-            Olá, {name}!
+            {name ? `Olá, ${name}!` : "Olá!"}
           </h2>
         </div>
         <p className="inline-flex w-fit items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">
@@ -164,7 +170,7 @@ export default function DashboardPage() {
             <DashboardCard
               title="Faturamento hoje"
               value={brl(todayRevenue)}
-              detail="Receitas pagas nesta loja"
+              detail={`Receitas pagas ${scopeLabel}`}
               icon={Banknote}
               tone="success"
             />
@@ -236,7 +242,7 @@ export default function DashboardPage() {
                 {active}
               </strong>
               <p className="mt-2 text-sm leading-relaxed text-sky-100">
-                atendimentos precisam da atenção da equipe nesta loja.
+                atendimentos precisam da atenção da equipe {scopeLabel}.
               </p>
               <Link
                 href="/orders"
@@ -254,7 +260,9 @@ export default function DashboardPage() {
                     Atendimentos recentes
                   </h2>
                   <p className="text-sm text-slate-500">
-                    Últimos registros desta loja
+                    {orders.consolidated
+                      ? "Últimos registros das lojas no filtro atual"
+                      : "Últimos registros desta loja"}
                   </p>
                 </div>
                 <Link
@@ -280,6 +288,10 @@ export default function DashboardPage() {
                           className={`rounded-full px-2 py-1 text-[10px] font-bold ${statusTone[item.status]}`}
                         >
                           {statusLabel[item.status]}
+                        </span>
+                        <StoreTag storeId={item.store_id} />
+                        <span className="text-xs font-semibold text-slate-500">
+                          {dateTimeBR(item.created_at)}
                         </span>
                       </div>
                       <p className="mt-1 truncate font-bold">
@@ -309,7 +321,7 @@ export default function DashboardPage() {
               <div className="mt-4 space-y-3">
                 {returnLeads.slice(0, 3).map((lead) => (
                   <div
-                    key={lead.customer_id}
+                    key={`${lead.store_id}-${lead.customer_id}`}
                     className="flex items-center gap-3 rounded-xl bg-slate-50 p-3"
                   >
                     <span className="grid h-9 w-9 place-items-center rounded-full bg-white text-wash-700">
@@ -322,6 +334,7 @@ export default function DashboardPage() {
                       <p className="text-xs text-slate-500">
                         {lead.days_since_last_visit} dias sem retornar
                       </p>
+                      <StoreTag storeId={lead.store_id} className="mt-1" />
                     </div>
                     {lead.whatsapp ? (
                       <a
@@ -348,6 +361,18 @@ export default function DashboardPage() {
       )}
     </AppShell>
   );
+}
+
+// Data e hora do registro, no formato curto usado nas listagens.
+function dateTimeBR(value: string) {
+  const date = new Date(value);
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function dateKey(date: Date) {

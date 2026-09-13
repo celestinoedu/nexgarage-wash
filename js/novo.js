@@ -1,6 +1,6 @@
 // Fluxo "Novo Registro" — particular (busca por placa) ou parceiro.
-import * as db from "./db.js?v=2.0.2";
-import { $, $$, money, today, esc, norm, toast, openModal, closeModal, formData } from "./ui.js?v=2.0.2";
+import * as db from "./db.js?v=2.1.0";
+import { $, $$, money, today, esc, norm, toast, openModal, closeModal, formData } from "./ui.js?v=2.1.0";
 
 function proximoOS(ats) {
   let max = 0;
@@ -11,6 +11,17 @@ function proximoOS(ats) {
   return "OS" + String(max + 1).padStart(3, "0");
 }
 
+// Na visão consolidada o usuário escolhe a loja do registro; na visão por loja
+// o destino é implícito e o campo não aparece.
+function lojaCampoHTML() {
+  if (!db.access.isConsolidated()) return "";
+  const atual = db.access.writeStoreId();
+  return `<label>Loja do registro
+    <select id="lojaRegistro">
+      ${db.access.knownStores().map((loja) => `<option value="${esc(loja.id)}" ${loja.id === atual ? "selected" : ""}>${esc(loja.name)}</option>`).join("")}
+    </select></label>`;
+}
+
 export async function renderNovoRegistro({ onSaved } = {}) {
   const [cli, parc, servCat, ats] = await Promise.all([
     db.clientes.list(),
@@ -18,7 +29,12 @@ export async function renderNovoRegistro({ onSaved } = {}) {
     db.servicos.list(),
     db.atendimentos.list(500),
   ]);
-  const osNum = proximoOS(ats);
+  // A numeração de OS é por loja: na visão consolidada a lista traz todas as
+  // lojas, então o próximo número sai só dos atendimentos da loja escolhida.
+  const osDaLoja = (lojaId) =>
+    proximoOS(lojaId ? ats.filter((a) => a.store_id === lojaId) : ats);
+  const lojaAtual = () => (db.access.isConsolidated() ? db.access.writeStoreId() : null);
+  const osNum = osDaLoja(lojaAtual());
 
   // Estado do registro em construção
   const st = {
@@ -35,6 +51,15 @@ export async function renderNovoRegistro({ onSaved } = {}) {
 
   const { card, close } = openModal(`Novo Registro · ${osNum}`, body(), { wide: true });
 
+  // Trocar a loja no formulário troca a numeração exibida no título.
+  const lojaSelect = $("#lojaRegistro", card);
+  if (lojaSelect) {
+    lojaSelect.onchange = () => {
+      const titulo = document.querySelector("#modal-root .modal-head h3");
+      if (titulo) titulo.textContent = `Novo Registro · ${osDaLoja(lojaSelect.value)}`;
+    };
+  }
+
   function body() {
     return `
       <div class="seg">
@@ -46,6 +71,7 @@ export async function renderNovoRegistro({ onSaved } = {}) {
       <div id="servicos"></div>
       <hr/>
       <div class="form grid-form">
+        ${lojaCampoHTML()}
         <label>Data<input id="data" type="date" value="${today()}"/></label>
         <label>Forma de pagamento
           <select id="forma"><option>PIX</option><option>DINHEIRO</option><option>CARTAO</option></select></label>
@@ -264,6 +290,12 @@ export async function renderNovoRegistro({ onSaved } = {}) {
   }
 
   async function salvar() {
+    // O seletor de loja define onde cliente, carro, atendimento e lançamento
+    // financeiro deste registro serão gravados, sem alterar o filtro das telas.
+    return db.access.runInStore(lojaSelect?.value || null, gravar);
+  }
+
+  async function gravar() {
     try {
       // Resolve cliente / carro / parceiro
       if (st.tipo === "PARTICULAR") {
@@ -313,7 +345,8 @@ export async function renderNovoRegistro({ onSaved } = {}) {
       const desconto = itensServicos.reduce((s, i) => s + i.desconto, 0);
 
       await db.atendimentos.create({
-        os_numero: osNum,
+        // Recalculado agora, já dentro da loja de destino.
+        os_numero: osDaLoja(lojaAtual()),
         data,
         tipo: st.tipo,
         cliente_id: st.tipo === "PARTICULAR" ? st.cliente_id : null,

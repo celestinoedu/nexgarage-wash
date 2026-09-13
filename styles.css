@@ -319,3 +319,62 @@ select.mini { width: auto; max-width: 220px; padding: 6px 10px; font-size: 13px;
   .service-values label { flex: 1; min-width: 86px; }
   .service-values input { width: 100%; }
 }
+
+/* ============================================================ VERSÃO NOVA x LEGADO */
+.version-switch {
+  display: inline-flex; align-items: center; gap: 2px; padding: 3px;
+  border: 1px solid var(--line); background: var(--panel-2); border-radius: 999px;
+}
+.version-switch .vs-option {
+  border: none; background: transparent; color: var(--muted); cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 800; padding: 6px 12px; border-radius: 999px;
+  white-space: nowrap;
+}
+.version-switch .vs-option.active { background: var(--panel); color: var(--txt); box-shadow: 0 1px 3px rgba(0,0,0,.2); cursor: default; }
+.version-switch button.vs-option:hover { color: var(--txt); background: rgba(47,124,255,.14); }
+.auth-version { display: flex; justify-content: center; margin-bottom: 14px; }
+
+.version-toast {
+  position: fixed; right: 16px; bottom: 16px; z-index: 9999; width: min(360px, calc(100vw - 32px));
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 16px 16px 14px;
+  opacity: 0; transform: translateY(12px); transition: opacity .22s ease, transform .22s ease;
+}
+.version-toast.show { opacity: 1; transform: translateY(0); }
+.version-toast .vt-title { display: block; font-size: 14px; padding-right: 20px; }
+.version-toast .vt-text { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.version-toast .vt-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.version-toast .vt-actions .btn { padding: 8px 12px; font-size: 13px; }
+.version-toast .vt-close {
+  position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; line-height: 1;
+  border: none; background: transparent; color: var(--muted); font-size: 20px; cursor: pointer; border-radius: 8px;
+}
+.version-toast .vt-close:hover { background: var(--panel-2); color: var(--txt); }
+@media (max-width: 720px) {
+  .topbar .version-switch { display: none; }
+  .version-toast { right: 12px; left: 12px; bottom: 12px; width: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .version-toast { transition: none; }
+}
+.sidebar-version { display: none; margin-top: 12px; }
+@media (max-width: 720px) { .sidebar-version { display: flex; justify-content: center; } }
+
+/* ============================================================ VISÃO CONSOLIDADA */
+.active-store.consolidated { position: relative; }
+.active-store.consolidated select {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; cursor: pointer; border: none; padding: 0; margin: 0;
+}
+.tag.store { background: rgba(47,124,255,.14); color: #8fb6ff; border-color: rgba(47,124,255,.35); font-weight: 700; }
+
+.scope-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin: 8px 0 4px; }
+.scope-option {
+  display: grid; gap: 6px; padding: 14px; text-align: left; cursor: pointer;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); color: var(--txt);
+  font: inherit;
+}
+.scope-option:hover { border-color: var(--primary); }
+.scope-option.active { border-color: var(--primary); background: rgba(47,124,255,.1); }
+.scope-option .scope-icon { font-size: 20px; line-height: 1; }
+.scope-option strong { font-size: 14px; }

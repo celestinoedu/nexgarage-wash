@@ -1,5 +1,31 @@
-import * as db from "./db.js?v=2.0.2";
-import { $, $$, esc, openModal, toast } from "./ui.js?v=2.0.2";
+import * as db from "./db.js?v=2.1.0";
+import { $, $$, esc, openModal, toast } from "./ui.js?v=2.1.0";
+import { setVersionPreference, versionPreference, newAppUrl } from "./version-switch.js?v=2.1.0";
+
+// ---- CPF -------------------------------------------------------------------
+const onlyDigits = (value) => String(value || "").replace(/[^0-9]/g, "");
+
+function formatCPF(value) {
+  const digits = onlyDigits(value).slice(0, 11);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 3)}.${digits.slice(3)}`;
+  if (digits.length <= 9) return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6)}`;
+  return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
+}
+
+// Validação pelos dois dígitos verificadores, para não gravar CPF inexistente.
+function isValidCPF(value) {
+  const digits = onlyDigits(value);
+  if (digits.length !== 11) return false;
+  if (new Set(digits).size === 1) return false; // 000..., 111... nao sao CPFs validos
+  for (const length of [9, 10]) {
+    let sum = 0;
+    for (let i = 0; i < length; i += 1) sum += Number(digits[i]) * (length + 1 - i);
+    const check = (sum * 10) % 11 % 10;
+    if (check !== Number(digits[length])) return false;
+  }
+  return true;
+}
 
 const accountRoleLabel = (role) =>
   role === "owner" ? "Proprietário" : role === "admin" ? "Administrador" : "Membro";
@@ -17,21 +43,29 @@ const errorMessage = (error) => {
 
 export async function renderConfiguracoes(context) {
   const root = $("#view");
-  if (!context?.permissions?.canManageAccount) {
-    root.innerHTML = `<div class="card"><div class="empty">Somente o proprietário ou administrador pode acessar estas configurações.</div></div>`;
-    return;
-  }
+  const isAdmin = Boolean(context?.permissions?.canManageAccount);
+  const accountId = context?.store?.account_id;
 
-  const accountId = context.store.account_id;
-  const [stores, users] = await Promise.all([db.access.stores(), db.access.accountUsers(accountId)]);
+  // Meus dados e Visualização valem para qualquer usuário; lojas e acessos
+  // continuam restritos a proprietário e administrador.
+  const [profile, stores, users] = await Promise.all([
+    db.perfil.get(),
+    db.access.stores(),
+    isAdmin ? db.access.accountUsers(accountId) : Promise.resolve([]),
+  ]);
+
   root.innerHTML = `
     <div class="settings-head">
       <div>
-        <h2>Configurações da conta</h2>
-        <p class="muted">Gerencie as lojas da TOP LINE, usuários e permissões de acesso.</p>
+        <h2>Configurações</h2>
+        <p class="muted">Seus dados, o formato de visualização e ${isAdmin ? "a administração da conta" : "suas preferências"}.</p>
       </div>
     </div>
 
+    ${profileCardHTML(profile)}
+    ${scopeCardHTML(stores)}
+
+    ${!isAdmin ? "" : `
     <div class="card">
       <div class="card-head">
         <div><h3>Lojas</h3><p class="muted small">Cada unidade possui dados operacionais independentes.</p></div>
@@ -85,7 +119,11 @@ export async function renderConfiguracoes(context) {
           </tbody>
         </table>
       </div>
-    </div>`;
+    </div>`}`;
+
+  mountProfileCard(profile, context);
+  mountScopeCard(context);
+  if (!isAdmin) return;
 
   $("#newStore").onclick = () => storeModal({ accountId, stores, context });
   $("#newUser").onclick = () => userModal({ accountId, stores, context });
@@ -103,6 +141,149 @@ export async function renderConfiguracoes(context) {
   });
   $$('[data-edit-user]').forEach((button) => {
     button.onclick = () => userModal({ accountId, stores, context, user: users.find((item) => item.user_id === button.dataset.editUser) });
+  });
+}
+
+// ---- Meus dados ------------------------------------------------------------
+function profileCardHTML(profile) {
+  const estendido = profile?.extended !== false;
+  return `
+    <div class="card">
+      <div class="card-head">
+        <div><h3>Meus dados</h3><p class="muted small">O nome informado aqui é o que aparece na saudação e nas telas de acesso.</p></div>
+      </div>
+      <form class="form" id="profileForm">
+        <div class="grid-2">
+          <label>Nome completo<input name="full_name" required value="${esc(profile?.full_name || "")}" placeholder="Seu nome" /></label>
+          ${estendido ? `<label>CPF<input name="document" id="profileDoc" inputmode="numeric" maxlength="14" value="${esc(formatCPF(profile?.document || ""))}" placeholder="000.000.000-00" /></label>` : ""}
+        </div>
+        <div class="grid-2">
+          <label>Telefone<input name="phone" value="${esc(profile?.phone || "")}" placeholder="(00) 0000-0000" /></label>
+          ${estendido ? `<label>WhatsApp<input name="whatsapp" value="${esc(profile?.whatsapp || "")}" placeholder="(00) 00000-0000" /></label>` : ""}
+        </div>
+        <div class="grid-2">
+          ${estendido ? `<label>Data de nascimento<input name="birth_date" type="date" value="${esc(String(profile?.birth_date || "").slice(0, 10))}" /></label>` : ""}
+          <label>E-mail<input name="email" type="email" required value="${esc(profile?.email || "")}" /></label>
+        </div>
+        <p class="muted small">Trocar o e-mail exige confirmação: um link é enviado para o novo endereço e o acesso só muda depois que você confirmar.</p>
+        ${estendido ? "" : `<p class="muted small">CPF, WhatsApp e data de nascimento aparecem aqui depois que a migração <code>supabase/nexwash_profile_fields.sql</code> for aplicada no Supabase.</p>`}
+        <p class="err" id="profileError"></p>
+        <div class="row gap end"><button class="btn primary" type="submit">Salvar meus dados</button></div>
+      </form>
+    </div>`;
+}
+
+function mountProfileCard(profile, context) {
+  const form = $("#profileForm");
+  if (!form) return;
+  const doc = $("#profileDoc");
+  if (doc) doc.oninput = () => { doc.value = formatCPF(doc.value); };
+
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.target).entries());
+    const error = $("#profileError");
+    const submit = event.target.querySelector('[type="submit"]');
+    const cpf = onlyDigits(data.document || "");
+    if (cpf && !isValidCPF(cpf)) {
+      error.textContent = "CPF inválido. Confira os números digitados.";
+      return;
+    }
+    error.textContent = "";
+    submit.disabled = true;
+    const emailChanged = data.email.trim().toLowerCase() !== String(profile?.email || "").toLowerCase();
+    try {
+      await db.perfil.save({
+        id: profile.id,
+        extended: profile.extended !== false,
+        full_name: data.full_name.trim(),
+        phone: (data.phone || "").trim(),
+        whatsapp: (data.whatsapp || "").trim(),
+        document: cpf,
+        birth_date: data.birth_date || null,
+        email: emailChanged ? data.email.trim() : null,
+      });
+      toast(emailChanged ? "Dados salvos. Confirme o novo e-mail pelo link enviado." : "Dados salvos.");
+      await renderConfiguracoes(context);
+    } catch (reason) {
+      error.textContent = errorMessage(reason);
+      submit.disabled = false;
+    }
+  };
+}
+
+// ---- Visualização ----------------------------------------------------------
+function scopeOptionHTML({ active, icon, title, detail, action }) {
+  return `<button type="button" class="scope-option ${active ? "active" : ""}" data-scope-action="${esc(action)}" aria-pressed="${active}">
+    <span class="scope-icon">${icon}</span>
+    <strong>${esc(title)}${active ? ' <span class="tag ok">em uso</span>' : ""}</strong>
+    <span class="muted small">${esc(detail)}</span>
+  </button>`;
+}
+
+function scopeCardHTML(stores) {
+  const consolidated = db.access.scopeMode() === "consolidated";
+  const onNewVersion = versionPreference() === "next";
+  return `
+    <div class="card">
+      <div class="card-head">
+        <div><h3>Visualização</h3><p class="muted small">Escolha o escopo dos dados e a versão da interface.</p></div>
+      </div>
+      <strong class="small">Escopo dos dados</strong>
+      <div class="scope-grid">
+        ${scopeOptionHTML({
+          active: !consolidated,
+          icon: "🏪",
+          title: "Uma loja por vez",
+          detail: "Cada tela mostra apenas os dados da loja selecionada, como no acesso atual.",
+          action: "single",
+        })}
+        ${scopeOptionHTML({
+          active: consolidated,
+          icon: "🏢",
+          title: "Todas as lojas consolidadas",
+          detail: "As telas somam os dados de todas as lojas, com filtro por loja e coluna de origem em cada registro.",
+          action: "consolidated",
+        })}
+      </div>
+      ${consolidated && stores.length < 2 ? `<p class="muted small">Sua conta tem apenas uma loja, então a visão consolidada mostra o mesmo conteúdo até você cadastrar outra.</p>` : ""}
+
+      <hr />
+      <strong class="small">Versão da interface</strong>
+      <div class="scope-grid">
+        ${scopeOptionHTML({
+          active: onNewVersion,
+          icon: "✨",
+          title: "Versão nova",
+          detail: "Interface reformulada do NexWash. É a versão principal.",
+          action: "version-next",
+        })}
+        ${scopeOptionHTML({
+          active: !onNewVersion,
+          icon: "🖥️",
+          title: "Versão atual (legado)",
+          detail: "Mantém esta interface, que sua equipe já usa.",
+          action: "version-legacy",
+        })}
+      </div>
+    </div>`;
+}
+
+function mountScopeCard(context) {
+  $$("[data-scope-action]").forEach((button) => {
+    button.onclick = () => {
+      const action = button.dataset.scopeAction;
+      if (action === "single" || action === "consolidated") {
+        db.access.setScopeMode(action);
+        if (action === "single") db.access.setScopeFilter("all");
+        // O escopo muda o cabeçalho e as colunas de todas as telas.
+        location.reload();
+        return;
+      }
+      setVersionPreference(action === "version-next" ? "next" : "legacy");
+      if (action === "version-next") location.href = newAppUrl();
+      else renderConfiguracoes(context);
+    };
   });
 }
 

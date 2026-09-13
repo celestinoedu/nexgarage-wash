@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
@@ -10,6 +10,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { useStore } from "@/components/StoreProvider";
 import { useStoreRows } from "@/hooks/useStoreRows";
 import { supabase } from "@/lib/supabase";
 import { brl } from "@/lib/utils";
@@ -34,6 +35,17 @@ type Partner = { id: string; name: string };
 
 export default function NewOrderPage() {
   const router = useRouter();
+  const { consolidated, stores, writeStore, storeFilter } = useStore();
+  // Um atendimento pertence a uma loja só: na visão consolidada o usuário
+  // escolhe a loja antes, e cliente, veículo, serviços e equipe passam a ser
+  // os daquela loja.
+  const [targetStoreId, setTargetStoreId] = useState("");
+  const orderStoreId =
+    targetStoreId ||
+    (storeFilter !== "all" ? storeFilter : "") ||
+    writeStore?.id ||
+    stores[0]?.id ||
+    "";
   const customers = useStoreRows<Customer>("customers", {
     select: "id,name",
     orderBy: "name",
@@ -59,6 +71,11 @@ export default function NewOrderPage() {
     orderBy: "name",
     ascending: true,
   });
+  const ofStore = useCallback(
+    <T extends { store_id: string }>(rows: T[]) =>
+      orderStoreId ? rows.filter((row) => row.store_id === orderStoreId) : rows,
+    [orderStoreId],
+  );
   const [kind, setKind] = useState("walk_in");
   const [customerId, setCustomerId] = useState("");
   const [vehicleId, setVehicleId] = useState("");
@@ -71,14 +88,19 @@ export default function NewOrderPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const storeCustomers = ofStore(customers.rows);
+  const storeVehicles = ofStore(vehicles.rows);
+  const storeServices = ofStore(services.rows);
+  const storeEmployees = ofStore(employees.rows);
+  const storePartners = ofStore(partners.rows);
   const availableVehicles = useMemo(
     () =>
       customerId
-        ? vehicles.rows.filter((item) => item.customer_id === customerId)
-        : vehicles.rows,
-    [customerId, vehicles.rows],
+        ? storeVehicles.filter((item) => item.customer_id === customerId)
+        : storeVehicles,
+    [customerId, storeVehicles],
   );
-  const chosenServices = services.rows.filter((service) =>
+  const chosenServices = storeServices.filter((service) =>
     selected.includes(service.id),
   );
   const subtotal = chosenServices.reduce(
@@ -95,7 +117,11 @@ export default function NewOrderPage() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!services.store || !supabase || selected.length === 0) {
+    if (!orderStoreId || !supabase) {
+      setError("Selecione a loja do atendimento.");
+      return;
+    }
+    if (selected.length === 0) {
       setError("Selecione pelo menos um serviço.");
       return;
     }
@@ -108,7 +134,7 @@ export default function NewOrderPage() {
     const { data, error: createError } = await supabase.rpc(
       "create_service_order",
       {
-        p_store_id: services.store.id,
+        p_store_id: orderStoreId,
         p_kind: kind,
         p_customer_id: customerId || null,
         p_vehicle_id: vehicleId || null,
@@ -152,6 +178,29 @@ export default function NewOrderPage() {
               detail="Identifique quem está deixando o veículo."
             />
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              {consolidated ? (
+                <Field label="Loja do atendimento">
+                  <select
+                    value={orderStoreId}
+                    onChange={(event) => {
+                      setTargetStoreId(event.target.value);
+                      setCustomerId("");
+                      setVehicleId("");
+                      setPartnerId("");
+                      setEmployeeId("");
+                      setSelected([]);
+                    }}
+                    className="field"
+                    required
+                  >
+                    {stores.map((store) => (
+                      <option key={store.id} value={store.id}>
+                        {store.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              ) : null}
               <Field label="Tipo de atendimento">
                 <select
                   value={kind}
@@ -172,7 +221,7 @@ export default function NewOrderPage() {
                     className="field"
                   >
                     <option value="">Selecione</option>
-                    {partners.rows.map((item) => (
+                    {storePartners.map((item) => (
                       <option key={item.id} value={item.id}>
                         {item.name}
                       </option>
@@ -190,7 +239,7 @@ export default function NewOrderPage() {
                   className="field"
                 >
                   <option value="">Selecione</option>
-                  {customers.rows.map((item) => (
+                  {storeCustomers.map((item) => (
                     <option key={item.id} value={item.id}>
                       {item.name}
                     </option>
@@ -237,7 +286,7 @@ export default function NewOrderPage() {
               </div>
             ) : (
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                {services.rows.map((service) => {
+                {storeServices.map((service) => {
                   const checked = selected.includes(service.id);
                   return (
                     <label
@@ -286,7 +335,7 @@ export default function NewOrderPage() {
                   className="field"
                 >
                   <option value="">Não atribuído</option>
-                  {employees.rows.map((item) => (
+                  {storeEmployees.map((item) => (
                     <option key={item.id} value={item.id}>
                       {item.name}
                     </option>

@@ -29,11 +29,36 @@ const ok = ({ data, error }) => {
 };
 
 let activeStore = null;
+let allStores = [];
+// "single": uma loja por vez, como sempre foi. "consolidated": todas as lojas
+// permitidas de uma vez, com filtro opcional por loja.
+let scopeMode = localStorage.getItem("nexwash:store-scope") === "consolidated" ? "consolidated" : "single";
+let scopeFilter = localStorage.getItem("nexwash:store-filter") || "all";
+
+let writeOverride = null;
+
+// Loja de gravação: todo registro novo pertence a uma loja só.
 const storeId = () => {
+  if (writeOverride) return writeOverride;
+  if (isConsolidated() && scopeFilter !== "all") return scopeFilter;
   if (!activeStore?.id) throw new Error("Selecione uma loja para continuar.");
   return activeStore.id;
 };
-const scoped = (query) => query.eq("store_id", storeId());
+
+function isConsolidated() {
+  return scopeMode === "consolidated" && allStores.length > 1;
+}
+
+// Lojas consultadas nas leituras, já com o filtro aplicado.
+function storeIds() {
+  if (!isConsolidated()) return [storeId()];
+  if (scopeFilter !== "all" && allStores.some((store) => store.id === scopeFilter)) return [scopeFilter];
+  const ids = allStores.map((store) => store.id);
+  if (!ids.length) throw new Error("Selecione uma loja para continuar.");
+  return ids;
+}
+
+const scoped = (query) => query.in("store_id", storeIds());
 const withStore = (row) => ({ ...row, store_id: storeId() });
 
 // ---- Conta, lojas e permissões ---------------------------------------------
@@ -44,13 +69,49 @@ export const access = {
     if (store?.id) localStorage.setItem("tl_active_store", store.id);
     else localStorage.removeItem("tl_active_store");
   },
+  // ---- Escopo: uma loja por vez ou todas consolidadas ----------------------
+  knownStores: () => allStores,
+  setKnownStores(list) {
+    allStores = Array.isArray(list) ? list : [];
+    if (scopeFilter !== "all" && !allStores.some((store) => store.id === scopeFilter)) {
+      access.setScopeFilter("all");
+    }
+  },
+  isConsolidated,
+  scopeMode: () => scopeMode,
+  setScopeMode(mode) {
+    scopeMode = mode === "consolidated" ? "consolidated" : "single";
+    localStorage.setItem("nexwash:store-scope", scopeMode);
+  },
+  scopeFilter: () => (isConsolidated() ? scopeFilter : "all"),
+  setScopeFilter(storeId) {
+    scopeFilter = storeId || "all";
+    localStorage.setItem("nexwash:store-filter", scopeFilter);
+  },
+  storeIds,
+  writeStoreId: () => storeId(),
+  // Fixa a loja de gravação durante uma operação (ex.: salvar um registro na
+  // visão consolidada) sem mexer no filtro de leitura das telas.
+  async runInStore(id, fn) {
+    writeOverride = id || null;
+    try {
+      return await fn();
+    } finally {
+      writeOverride = null;
+    }
+  },
+  storeName(id) {
+    return allStores.find((store) => store.id === id)?.name || "Loja";
+  },
   async stores() {
-    return supabase
+    const list = await supabase
       .from("stores")
       .select("id,account_id,name,city,state,logo_url")
       .eq("active", true)
       .order("name")
       .then(ok);
+    access.setKnownStores(list);
+    return list;
   },
   async permissions(store) {
     const { data: userData } = await supabase.auth.getUser();
@@ -115,6 +176,52 @@ export const access = {
     supabase.from("stores").update(row).eq("id", id).select().single().then(ok),
 };
 
+// ---- Perfil do usuário -----------------------------------------------------
+export const perfil = {
+  async get() {
+    const { data: userData } = await supabase.auth.getUser();
+    const user = userData.user;
+    if (!user) return null;
+    const estendido = await supabase
+      .from("profiles")
+      .select("id,full_name,phone,whatsapp,document,birth_date")
+      .eq("id", user.id)
+      .maybeSingle();
+    // Sem a migração nexwash_profile_fields.sql as colunas extras não existem;
+    // o cadastro continua funcionando com nome e telefone.
+    const extended = !estendido.error;
+    const base = extended
+      ? estendido
+      : await supabase.from("profiles").select("id,full_name,phone").eq("id", user.id).maybeSingle();
+    if (base.error) throw base.error;
+    const data = base.data;
+    return {
+      id: user.id,
+      email: user.email || "",
+      extended,
+      full_name: data?.full_name || user.user_metadata?.full_name || "",
+      phone: data?.phone || "",
+      whatsapp: data?.whatsapp || "",
+      document: data?.document || "",
+      birth_date: data?.birth_date || "",
+    };
+  },
+  async save({ id, full_name, phone, whatsapp, document, birth_date, email, extended = true }) {
+    const row = { id, full_name, phone: phone || null };
+    if (extended) {
+      row.whatsapp = whatsapp || null;
+      row.document = document || null;
+      row.birth_date = birth_date || null;
+    }
+    // upsert cobre usuários migrados do legado que ainda não têm linha em profiles.
+    await supabase.from("profiles").upsert(row).then(ok);
+    const payload = { data: { full_name } };
+    if (email) payload.email = email;
+    const { error } = await supabase.auth.updateUser(payload);
+    if (error) throw error;
+  },
+};
+
 // ---- Clientes --------------------------------------------------------------
 export const clientes = {
   list: () => scoped(supabase.from("clientes").select("*")).order("nome").then(ok),
@@ -133,7 +240,7 @@ export const carros = {
       .from("carros")
       .select("*, clientes(*)")
       .ilike("placa", placa.trim())
-      .eq("store_id", storeId())
+      .in("store_id", storeIds())
       .then(ok),
   create: (row) => supabase.from("carros").insert(withStore(row)).select().single().then(ok),
   update: (id, row) => scoped(supabase.from("carros").update(row).eq("id", id)).select().single().then(ok),
@@ -180,7 +287,7 @@ export const atendimentos = {
     supabase
       .from("atendimentos")
       .select("*, clientes(nome,telefone), parceiros(nome)")
-      .eq("store_id", storeId())
+      .in("store_id", storeIds())
       .order("data", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(limit)
@@ -190,7 +297,7 @@ export const atendimentos = {
       .from("atendimentos")
       .select("*")
       .eq("parceiro_id", pid)
-      .eq("store_id", storeId())
+      .in("store_id", storeIds())
       .order("data", { ascending: false })
       .then(ok),
   async create(row) {
@@ -212,7 +319,7 @@ export const agenda = {
     supabase
       .from("agenda_lavagens")
       .select("*, clientes(nome,telefone), carros(placa,veiculo)")
-      .eq("store_id", storeId())
+      .in("store_id", storeIds())
       .order("data", { ascending: true })
       .order("hora", { ascending: true })
       .limit(limit)
@@ -243,7 +350,7 @@ export const presenca = {
     supabase
       .from("presenca")
       .select("*, funcionarios(nome)")
-      .eq("store_id", storeId())
+      .in("store_id", storeIds())
       .order("data", { ascending: false })
       .limit(limit)
       .then(ok),
@@ -257,6 +364,8 @@ export const config = {
     const { data, error } = await supabase
       .from("configuracoes")
       .select("valor")
+      // Configurações são por loja: vale sempre a loja de gravação, mesmo na
+      // visão consolidada.
       .eq("store_id", storeId())
       .eq("chave", chave)
       .maybeSingle();

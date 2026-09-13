@@ -7,7 +7,9 @@
     "lite": "node lite/server.js",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "preview": "node scripts/preview-local.mjs",
+    "preview:serve": "node scripts/preview-local.mjs --no-build"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",

@@ -1,17 +1,33 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  BarChart3, Building2, CalendarDays, Car, ChevronDown, CircleDollarSign,
-  Handshake, LayoutDashboard, Menu, Settings, Sparkles, Target,
-  UserRoundCheck, Users, X
+  BarChart3,
+  Building2,
+  CalendarDays,
+  Car,
+  ChevronDown,
+  CircleDollarSign,
+  Handshake,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Settings,
+  UserCog,
+  Sparkles,
+  Target,
+  UserRoundCheck,
+  Users,
+  X,
 } from "lucide-react";
 import { MobileBottomNavigation } from "./MobileBottomNavigation";
 import { NexWashLogo } from "./NexWashLogo";
 import { useAuth } from "./AuthProvider";
 import { useStore } from "./StoreProvider";
+import { VersionSwitch } from "./VersionSwitch";
 
 const navGroups = [
   {
@@ -21,15 +37,15 @@ const navGroups = [
       { href: "/orders", label: "Atendimentos", icon: Sparkles },
       { href: "/orders/new", label: "Novo atendimento", icon: CalendarDays },
       { href: "/customers", label: "Clientes", icon: Users },
-      { href: "/cars", label: "Veículos", icon: Car }
-    ]
+      { href: "/cars", label: "Veículos", icon: Car },
+    ],
   },
   {
     label: "Relacionamento",
     items: [
       { href: "/partners", label: "Parceiros", icon: Handshake },
-      { href: "/opportunities", label: "Oportunidades", icon: Target }
-    ]
+      { href: "/opportunities", label: "Oportunidades", icon: Target },
+    ],
   },
   {
     label: "Gestão",
@@ -38,41 +54,104 @@ const navGroups = [
       { href: "/team", label: "Equipe e presença", icon: UserRoundCheck },
       { href: "/finance", label: "Financeiro", icon: CircleDollarSign },
       { href: "/reports", label: "Relatórios", icon: BarChart3 },
-      { href: "/settings", label: "Configurações", icon: Settings }
-    ]
-  }
+      { href: "/settings", label: "Configurações", icon: Settings },
+    ],
+  },
 ];
 
-function SidebarContent({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
-  const { stores, currentStore, selectStore } = useStore();
+function SidebarContent({
+  pathname,
+  onNavigate,
+}: {
+  pathname: string;
+  onNavigate?: () => void;
+}) {
+  const { stores, currentStore, selectStore, consolidated, storeFilter, setStoreFilter } =
+    useStore();
+  // Na visão consolidada o seletor deixa de trocar a loja de trabalho e passa
+  // a controlar o filtro global, que vale para todas as páginas.
+  const pickerValue = consolidated ? storeFilter : (currentStore?.id ?? "");
+  const pickerLabel = consolidated
+    ? storeFilter === "all"
+      ? "Todas as lojas"
+      : (stores.find((store) => store.id === storeFilter)?.name ?? "Todas as lojas")
+    : (currentStore?.name ?? "Carregando...");
   return (
     <>
       <div className="border-b border-white/10 px-5 py-5">
-        <NexWashLogo inverse />
-        <p className="mt-2 text-xs font-medium text-sky-200">Gestão que deixa seu negócio brilhando.</p>
+        {currentStore?.logo_url ? (
+          <Image
+            src={currentStore.logo_url}
+            alt={`Logo ${currentStore.name}`}
+            width={260}
+            height={96}
+            unoptimized
+            className="h-24 w-full rounded-xl object-cover object-center"
+          />
+        ) : (
+          <>
+            <NexWashLogo inverse />
+            <p className="mt-2 text-xs font-medium text-sky-200">
+              Gestão que deixa seu negócio brilhando.
+            </p>
+          </>
+        )}
       </div>
 
       <div className="relative mx-3 mt-4 flex items-center gap-3 rounded-xl border border-white/10 bg-white/10 p-3 transition hover:bg-white/15">
-        <span className="grid h-9 w-9 place-items-center rounded-lg bg-cyan-300 text-wash-950"><Building2 size={18} /></span>
+        <span className="grid h-9 w-9 place-items-center rounded-lg bg-cyan-300 text-wash-950">
+          <Building2 size={18} />
+        </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-xs text-sky-200">Loja ativa</span>
-          <strong className="block truncate text-sm text-white">{currentStore?.name ?? "Carregando..."}</strong>
+          <span className="block truncate text-xs text-sky-200">
+            {consolidated ? "Visão consolidada" : "Loja ativa"}
+          </span>
+          <strong className="block truncate text-sm text-white">
+            {pickerLabel}
+          </strong>
         </span>
         <ChevronDown size={17} className="text-sky-200" />
-        <select value={currentStore?.id ?? ""} onChange={(event) => selectStore(event.target.value)} className="absolute inset-0 cursor-pointer opacity-0" aria-label="Selecionar loja">
-          {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
+        <select
+          value={pickerValue}
+          onChange={(event) =>
+            consolidated
+              ? setStoreFilter(event.target.value)
+              : selectStore(event.target.value)
+          }
+          className="absolute inset-0 cursor-pointer opacity-0"
+          aria-label={consolidated ? "Filtrar por loja" : "Selecionar loja"}
+        >
+          {consolidated ? <option value="all">Todas as lojas</option> : null}
+          {stores.map((store) => (
+            <option key={store.id} value={store.id}>
+              {store.name}
+            </option>
+          ))}
         </select>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-3 pb-5 pt-4" aria-label="Navegação principal">
+      <nav
+        className="flex-1 overflow-y-auto px-3 pb-5 pt-4"
+        aria-label="Navegação principal"
+      >
         {navGroups.map((group) => (
           <div key={group.label} className="mb-5">
-            <p className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-sky-300/80">{group.label}</p>
+            <p className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-sky-300/80">
+              {group.label}
+            </p>
             <div className="space-y-1">
               {group.items.map((item) => {
-                const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(`${item.href}/`));
+                const active =
+                  pathname === item.href ||
+                  (item.href !== "/dashboard" &&
+                    pathname.startsWith(`${item.href}/`));
                 return (
-                  <Link key={item.href} href={item.href} onClick={onNavigate} className={`flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-semibold transition ${active ? "bg-white text-wash-900 shadow-sm" : "text-sky-100 hover:bg-white/10 hover:text-white"}`}>
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={onNavigate}
+                    className={`flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-semibold transition ${active ? "bg-white text-wash-900 shadow-sm" : "text-sky-100 hover:bg-white/10 hover:text-white"}`}
+                  >
                     <item.icon size={18} aria-hidden />
                     {item.label}
                   </Link>
@@ -82,15 +161,130 @@ function SidebarContent({ pathname, onNavigate }: { pathname: string; onNavigate
           </div>
         ))}
       </nav>
+
+      <div className="border-t border-white/10 p-3 md:hidden">
+        <VersionSwitch compact />
+      </div>
     </>
   );
 }
 
-export function AppShell({ children, title, action }: { children: React.ReactNode; title: string; action?: React.ReactNode }) {
+/**
+ * Menu da conta. Antes o botão do perfil encerrava a sessão direto no clique,
+ * apesar da seta indicar um menu — sair agora é uma escolha explícita.
+ */
+function UserMenu({
+  configured,
+  fullName,
+  initials,
+  email,
+  onSignOut,
+}: {
+  configured: boolean;
+  fullName: string;
+  initials: string;
+  email: string;
+  onSignOut: () => void | Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const container = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!container.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const itemClass =
+    "flex min-h-11 w-full items-center gap-2.5 px-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50";
+
+  return (
+    <div ref={container} className="relative hidden sm:block">
+      <button
+        onClick={() => setOpen((current) => !current)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="flex min-h-11 items-center gap-2 rounded-xl border border-line bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+        title={configured ? "Sua conta" : "Modo de prévia local"}
+      >
+        <span className="grid h-7 w-7 place-items-center rounded-full bg-wash-100 text-xs font-extrabold text-wash-800">
+          {initials || "NW"}
+        </span>
+        <span className="hidden max-w-28 truncate xl:inline">{fullName}</span>
+        <ChevronDown
+          size={15}
+          className={open ? "rotate-180 transition" : "transition"}
+        />
+      </button>
+
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 top-[calc(100%+0.5rem)] z-40 w-64 overflow-hidden rounded-xl border border-line bg-white py-1 shadow-float"
+        >
+          <div className="border-b border-line px-3 pb-2 pt-1">
+            <strong className="block truncate text-sm">{fullName}</strong>
+            <p className="truncate text-xs text-slate-500">
+              {email || "Modo de prévia local"}
+            </p>
+          </div>
+          <Link
+            href="/settings#conta"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className={itemClass}
+          >
+            <UserCog size={17} aria-hidden /> Meus dados
+          </Link>
+          <Link
+            href="/settings"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className={itemClass}
+          >
+            <Settings size={17} aria-hidden /> Configurações
+          </Link>
+          {configured ? (
+            <button
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                void onSignOut();
+              }}
+              className={`${itemClass} border-t border-line text-rose-700 hover:bg-rose-50`}
+            >
+              <LogOut size={17} aria-hidden /> Sair da conta
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function AppShell({
+  children,
+  title,
+  action,
+}: {
+  children: React.ReactNode;
+  title: string;
+  action?: React.ReactNode;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const { configured, loading, user, signOut } = useAuth();
-  const { currentStore } = useStore();
+  const { currentStore, consolidated } = useStore();
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -98,11 +292,21 @@ export function AppShell({ children, title, action }: { children: React.ReactNod
   }, [configured, loading, router, user]);
 
   if (configured && (loading || !user)) {
-    return <div className="grid min-h-screen place-items-center bg-wash-50"><NexWashLogo /></div>;
+    return (
+      <div className="grid min-h-screen place-items-center bg-wash-50">
+        <NexWashLogo />
+      </div>
+    );
   }
 
-  const fullName = String(user?.user_metadata?.full_name ?? user?.email?.split("@")[0] ?? "Prévia");
-  const initials = fullName.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
+  const fullName = String(
+    user?.user_metadata?.full_name ?? user?.email?.split("@")[0] ?? "Prévia",
+  );
+  const initials = fullName
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
 
   return (
     <div className="min-h-screen">
@@ -112,10 +316,23 @@ export function AppShell({ children, title, action }: { children: React.ReactNod
 
       {menuOpen ? (
         <div className="fixed inset-0 z-50 lg:hidden">
-          <button className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" onClick={() => setMenuOpen(false)} aria-label="Fechar menu" />
+          <button
+            className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm"
+            onClick={() => setMenuOpen(false)}
+            aria-label="Fechar menu"
+          />
           <aside className="relative flex h-full w-[min(88vw,20rem)] flex-col bg-gradient-to-b from-wash-950 to-wash-800 shadow-2xl">
-            <button className="absolute right-3 top-3 grid h-10 w-10 place-items-center rounded-xl text-white hover:bg-white/10" onClick={() => setMenuOpen(false)} aria-label="Fechar menu"><X size={22} /></button>
-            <SidebarContent pathname={pathname} onNavigate={() => setMenuOpen(false)} />
+            <button
+              className="absolute right-3 top-3 grid h-10 w-10 place-items-center rounded-xl text-white hover:bg-white/10"
+              onClick={() => setMenuOpen(false)}
+              aria-label="Fechar menu"
+            >
+              <X size={22} />
+            </button>
+            <SidebarContent
+              pathname={pathname}
+              onNavigate={() => setMenuOpen(false)}
+            />
           </aside>
         </div>
       ) : null}
@@ -124,23 +341,46 @@ export function AppShell({ children, title, action }: { children: React.ReactNod
         <header className="sticky top-0 z-20 border-b border-line/80 bg-white/90 px-4 py-3 backdrop-blur-xl lg:px-8">
           <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
-              <button className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-line bg-white text-wash-900 lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Abrir menu"><Menu size={22} /></button>
+              <button
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-line bg-white text-wash-900 lg:hidden"
+                onClick={() => setMenuOpen(true)}
+                aria-label="Abrir menu"
+              >
+                <Menu size={22} />
+              </button>
               <div className="min-w-0">
-                <p className="truncate text-[11px] font-bold uppercase tracking-[0.12em] text-wash-700 lg:hidden">{currentStore?.name ?? "NexWash"}</p>
-                <h1 className="truncate text-xl font-extrabold tracking-[-0.035em] text-ink sm:text-2xl">{title}</h1>
+                <p className="truncate text-[11px] font-bold uppercase tracking-[0.12em] text-wash-700 lg:hidden">
+                  {consolidated
+                    ? "Todas as lojas"
+                    : (currentStore?.name ?? "NexWash")}
+                </p>
+                <h1 className="truncate text-xl font-extrabold tracking-[-0.035em] text-ink sm:text-2xl">
+                  {title}
+                </h1>
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              <div className="hidden md:block">
+                <VersionSwitch />
+              </div>
               {action}
-              <button onClick={async () => { if (configured) { await signOut(); router.replace("/login"); } }} className="hidden min-h-11 items-center gap-2 rounded-xl border border-line bg-white px-3 text-sm font-semibold text-slate-700 sm:flex" title={configured ? "Sair da conta" : "Modo de prévia local"}>
-                <span className="grid h-7 w-7 place-items-center rounded-full bg-wash-100 text-xs font-extrabold text-wash-800">{initials || "NW"}</span>
-                <span className="hidden max-w-28 truncate xl:inline">{fullName}</span>
-                <ChevronDown size={15} />
-              </button>
+              <UserMenu
+                configured={configured}
+                fullName={fullName}
+                initials={initials}
+                email={user?.email ?? ""}
+                onSignOut={async () => {
+                  if (!configured) return;
+                  await signOut();
+                  router.replace("/login");
+                }}
+              />
             </div>
           </div>
         </header>
-        <div className="mx-auto max-w-[1500px] px-4 py-5 sm:px-6 lg:px-8 lg:py-7">{children}</div>
+        <div className="mx-auto max-w-[1500px] px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
+          {children}
+        </div>
       </main>
       <MobileBottomNavigation />
     </div>

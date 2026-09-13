@@ -1,8 +1,9 @@
-import * as db from "./db.js?v=2.0.2";
-import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=2.0.2";
-import { renderNovoRegistro } from "./novo.js?v=2.0.2";
-import { renderRelatorios } from "./relatorios.js?v=2.0.2";
-import { renderConfiguracoes } from "./settings.js?v=2.0.2";
+import * as db from "./db.js?v=2.1.0";
+import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=2.1.0";
+import { renderNovoRegistro } from "./novo.js?v=2.1.0";
+import { renderRelatorios } from "./relatorios.js?v=2.1.0";
+import { renderConfiguracoes } from "./settings.js?v=2.1.0";
+import { applyVersionPreference, mountVersionToggle, showNewVersionNotice, versionToggleHTML } from "./version-switch.js?v=2.1.0";
 
 const BASE_MENU = [
   ["dashboard", "🏠", "Início"],
@@ -24,11 +25,8 @@ const state = {
   permissions: null,
 };
 
-const APP_VERSION = "2.0.1";
-const menuItems = () =>
-  state.permissions?.canManageAccount
-    ? [...BASE_MENU, ["configuracoes", "⚙️", "Configurações"]]
-    : BASE_MENU;
+const APP_VERSION = "2.1.0";
+const menuItems = () => [...BASE_MENU, ["configuracoes", "⚙️", "Configurações"]];
 
 // Rodapé com dados da desenvolvedora + versão.
 function footerHTML() {
@@ -56,6 +54,9 @@ const themeSwitchHTML = () =>
 
 // ============================================================ BOOTSTRAP
 async function boot() {
+  // Se o usuário já optou pela versão nova, ele é levado para lá antes de
+  // qualquer renderização do legado.
+  if (applyVersionPreference()) return;
   applyTheme(currentTheme());
   if (!db.isConfigured) return renderSetup();
   state.session = await db.auth.session();
@@ -79,6 +80,9 @@ async function prepareStore(forcePicker = false) {
     const savedId = forcePicker ? null : localStorage.getItem("tl_active_store");
     const savedStore = state.stores.find((item) => item.id === savedId);
     if (savedStore) return selectStore(savedStore);
+    // Na visão consolidada o usuário já vê todas as lojas: a tela de escolha
+    // vira ruído, então basta definir uma loja de gravação padrão.
+    if (db.access.isConsolidated() && !forcePicker) return selectStore(state.stores[0]);
     renderStorePicker();
   } catch (error) {
     console.error(error);
@@ -109,6 +113,7 @@ function renderSetup() {
 function renderLogin() {
   $("#app").innerHTML = `
     <div class="auth">
+      <div class="auth-version">${versionToggleHTML()}</div>
       <form class="auth-card" id="loginForm">
         <img class="brand-logo" src="assets/logo.png" alt="NexGarage" />
         <p class="muted">Top Line Higienizações · Lava Rápidos</p>
@@ -138,6 +143,8 @@ function renderLogin() {
     await prepareStore(true);
   };
   $("#createLogin").onclick = renderSignUp;
+  mountVersionToggle();
+  showNewVersionNotice();
 }
 
 function renderSignUp() {
@@ -221,6 +228,73 @@ function renderNoAccess(message = "Seu login ainda não possui acesso a nenhuma 
   $("#noAccessLogout").onclick = () => db.auth.signOut();
 }
 
+// Seletor da sidebar: troca a loja ativa na visão por loja, ou filtra as lojas
+// consultadas na visão consolidada.
+function storeScopeHTML() {
+  if (!db.access.isConsolidated()) {
+    return `<button class="active-store" id="switchStore" title="Trocar loja">
+      <span>🏪</span><span><small>Loja ativa</small><strong>${esc(state.store?.name || "")}</strong></span><b>⌄</b>
+    </button>`;
+  }
+  const filter = db.access.scopeFilter();
+  const label = filter === "all" ? "Todas as lojas" : db.access.storeName(filter);
+  return `<div class="active-store consolidated" title="Filtrar por loja">
+    <span>🏢</span>
+    <span><small>Visão consolidada</small><strong>${esc(label)}</strong></span>
+    <b>⌄</b>
+    <select id="storeFilter" aria-label="Filtrar por loja">
+      <option value="all" ${filter === "all" ? "selected" : ""}>Todas as lojas</option>
+      ${state.stores.map((store) => `<option value="${esc(store.id)}" ${filter === store.id ? "selected" : ""}>${esc(store.name)}</option>`).join("")}
+    </select>
+  </div>`;
+}
+
+function mountStoreScope() {
+  const switcher = $("#switchStore");
+  if (switcher) switcher.onclick = () => prepareStore(true);
+  const filter = $("#storeFilter");
+  if (filter) {
+    filter.onchange = () => {
+      db.access.setScopeFilter(filter.value);
+      renderShell();
+    };
+  }
+}
+
+// Campo "Loja" dos formulários de cadastro: só aparece na visão consolidada,
+// onde o destino do registro deixa de ser óbvio.
+function lojaField(registro = null) {
+  if (!db.access.isConsolidated()) return "";
+  const atual = registro?.store_id || db.access.writeStoreId();
+  const travado = Boolean(registro?.store_id);
+  return `<label>Loja
+    <select name="__loja" ${travado ? "disabled" : ""}>
+      ${db.access.knownStores().map((loja) => `<option value="${esc(loja.id)}" ${loja.id === atual ? "selected" : ""}>${esc(loja.name)}</option>`).join("")}
+    </select>
+    ${travado ? '<small class="muted">A loja de um registro existente não muda.</small>' : ""}
+  </label>`;
+}
+
+// Executa o salvamento na loja escolhida no formulário.
+function salvarNaLoja(form, fn) {
+  const select = form.querySelector('[name="__loja"]');
+  return db.access.runInStore(select && !select.disabled ? select.value : null, fn);
+}
+
+// Etiqueta com a loja de origem de um registro, só na visão consolidada.
+function storeTag(id) {
+  if (!db.access.isConsolidated()) return "";
+  return `<span class="tag store">${esc(db.access.storeName(id))}</span>`;
+}
+
+// Cabeçalho da coluna "Loja", presente só na visão consolidada.
+function storeTh() {
+  return db.access.isConsolidated() ? "<th>Loja</th>" : "";
+}
+function storeTd(id) {
+  return db.access.isConsolidated() ? `<td>${storeTag(id)}</td>` : "";
+}
+
 function renderShell() {
   const storeLogo = state.store?.logo_url || "assets/logo.png";
   $("#app").innerHTML = `
@@ -230,15 +304,14 @@ function renderShell() {
           <img class="brand-logo side" src="${esc(storeLogo)}" alt="${esc(state.store?.name || "Top Line Higienizações")}" />
           <button class="sidebar-collapse-btn" id="sidebarCollapse" title="Minimizar menu" aria-label="Minimizar menu">«</button>
         </div>
-        <button class="active-store" id="switchStore" title="Trocar loja">
-          <span>🏪</span><span><small>Loja ativa</small><strong>${esc(state.store?.name || "")}</strong></span><b>⌄</b>
-        </button>
+        ${storeScopeHTML()}
         <nav id="nav"></nav>
         <div class="sidebar-bottom">
           <div class="row between" style="align-items:center;gap:10px">
             <button class="btn ghost" id="logout">Sair</button>
             ${themeSwitchHTML()}
           </div>
+          <div class="sidebar-version">${versionToggleHTML()}</div>
           <div class="sidebar-footer">Desenvolvido por:<br><strong>LOTUS NEGÓCIOS LTDA</strong><br>CNPJ 45.537.878/0001-07 · v${APP_VERSION}</div>
         </div>
       </aside>
@@ -247,6 +320,7 @@ function renderShell() {
         <header class="topbar">
           <button class="icon-btn only-mobile" id="menuBtn">☰</button>
           <h1 id="pageTitle">Início</h1>
+          ${versionToggleHTML()}
           <button class="btn primary" id="novoBtn">+ Novo Registro</button>
         </header>
         <section id="view" class="view"></section>
@@ -268,11 +342,14 @@ function renderShell() {
   $("#sidebarCollapse").onclick = () => setSidebarCollapsed(!document.body.classList.contains("sidebar-collapsed"));
   $("#themeToggle").onclick = toggleTheme;
   $("#logout").onclick = () => db.auth.signOut();
-  $("#switchStore").onclick = () => prepareStore(true);
+  mountStoreScope();
   $("#novoBtn").onclick = () => renderNovoRegistro({ onSaved: () => route() });
   $("#menuBtn").onclick = () => document.body.classList.toggle("nav-open");
   $("#navBackdrop").onclick = () => document.body.classList.remove("nav-open");
   $$("[data-route]").forEach((b) => (b.onclick = () => { location.hash = b.dataset.route; }));
+
+  mountVersionToggle();
+  showNewVersionNotice();
 
   window.onhashchange = route;
   route();
@@ -466,7 +543,7 @@ function splitTag(a) {
 function tableAtend(list) {
   if (!list.length) return `<div class="empty">Sem atendimentos.</div>`;
   return `<div class="table-wrap"><table>
-    <thead><tr><th>Data</th><th>OS</th><th>Cliente / Parceiro</th><th>Veículo</th><th>Serviços</th><th class="r">Valor</th><th>Pg</th><th></th></tr></thead>
+    <thead><tr><th>Data</th><th>OS</th>${storeTh()}<th>Cliente / Parceiro</th><th>Veículo</th><th>Serviços</th><th class="r">Valor</th><th>Pg</th><th></th></tr></thead>
     <tbody>
       ${list
         .map((a) => {
@@ -474,6 +551,7 @@ function tableAtend(list) {
           return `<tr>
             <td>${dateBR(a.data)}</td>
             <td>${esc(a.os_numero || "")}</td>
+            ${storeTd(a.store_id)}
             <td>${esc(quem || "—")} ${a.tipo === "PARCEIRO" ? '<span class="tag">parceiro</span>' : ""} ${splitTag(a)}</td>
             <td>${esc(a.veiculo || "")}<br><small class="muted">${esc(a.placa || "")}</small></td>
             <td>${esc(a.servicos || "")}</td>
@@ -497,10 +575,10 @@ async function syncFinanceiro(atend) {
         base_antiga: atend.base_antiga, data: atend.data_pg || atend.data,
       });
     } else {
-      await db.financeiro.create({
+      await db.access.runInStore(atend.store_id || null, () => db.financeiro.create({
         data: atend.data_pg || atend.data, tipo: "ENTRADA", atendimento_id: atend.id,
         descricao: desc, valor: atend.valor, forma_pgto: atend.forma_pgto, base_antiga: atend.base_antiga,
-      });
+      }));
     }
   } else if (existentes.length) {
     await db.financeiro.removeByAtendimento(atend.id); // voltou a pendente: tira do caixa
@@ -611,9 +689,10 @@ async function viewAtendimentos() {
 async function viewAgenda() {
   const list = await db.agenda.list(500);
   const render = (rows) => rows.length ? `<div class="table-wrap"><table>
-    <thead><tr><th>Data / hora</th><th>Cliente</th><th>Carro</th><th>Serviço</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>Data / hora</th>${storeTh()}<th>Cliente</th><th>Carro</th><th>Serviço</th><th>Status</th><th></th></tr></thead>
     <tbody>${rows.map((a) => `<tr>
       <td><strong>${dateBR(a.data)}</strong>${a.hora ? `<br><small>${esc(a.hora.slice(0, 5))}</small>` : ""}</td>
+      ${storeTd(a.store_id)}
       <td>${esc(a.clientes?.nome || "—")}</td>
       <td>${esc(a.carros?.veiculo || "—")}<br><small class="muted">${esc(a.carros?.placa || "")}</small></td>
       <td>${esc(a.servicos || "—")}</td>
@@ -646,6 +725,7 @@ async function formAgenda(a = null) {
     .map((c) => `<option value="${c.id}" ${c.id === selected ? "selected" : ""}>${esc(c.placa)}${c.veiculo ? ` · ${esc(c.veiculo)}` : ""}</option>`).join("")}`;
   const { card, close } = openModal(a ? "Editar agendamento" : "Agendar lavagem", `
     <form id="agendaForm" class="form">
+      ${lojaField(a)}
       <div class="grid-form">
         <label>Data<input name="data" type="date" required value="${esc(String(a?.data || today()).slice(0, 10))}"/></label>
         <label>Hora<input name="hora" type="time" value="${esc(a?.hora?.slice(0, 5) || "")}"/></label>
@@ -659,8 +739,8 @@ async function formAgenda(a = null) {
     </form>`);
   $("#agendaCliente", card).onchange = (e) => { $("#agendaCarro", card).innerHTML = optionsCarros(e.target.value); };
   $("#agendaForm", card).onsubmit = async (e) => {
-    e.preventDefault(); const d = formData(e.target); d.hora = d.hora || null; d.carro_id = d.carro_id || null;
-    try { a ? await db.agenda.update(a.id, d) : await db.agenda.create(d); toast("Agendamento salvo."); close(); route(); }
+    e.preventDefault(); const d = formData(e.target); delete d.__loja; d.hora = d.hora || null; d.carro_id = d.carro_id || null;
+    try { await salvarNaLoja(e.target, () => (a ? db.agenda.update(a.id, d) : db.agenda.create(d))); toast("Agendamento salvo."); close(); route(); }
     catch (err) { toast(err.message, "err"); }
   };
   if (a) $("[data-del-ag]", card).onclick = async () => {
@@ -675,7 +755,7 @@ async function viewClientes() {
   allCarros.forEach((c) => { (carrosByCli[c.cliente_id] = carrosByCli[c.cliente_id] || []).push(c); });
 
   const render = (rows) => `<div class="table-wrap"><table>
-    <thead><tr><th>Nome</th><th>Telefone</th><th>Base</th><th>Carros</th><th></th></tr></thead>
+    <thead><tr><th>Nome</th>${storeTh()}<th>Telefone</th><th>Base</th><th>Carros</th><th></th></tr></thead>
     <tbody>${rows
       .map((c) => {
         const cars = carrosByCli[c.id] || [];
@@ -684,6 +764,7 @@ async function viewClientes() {
           : '<span class="muted small">sem carro</span>';
         return `<tr>
           <td><strong>${esc(c.nome)}</strong></td>
+          ${storeTd(c.store_id)}
           <td>${esc(c.telefone || "—")}</td>
           <td>${c.base_antiga ? '<span class="tag yuri">Yuri 40/60</span>' : '<span class="tag">50/50</span>'}</td>
           <td class="chips-cell">${chips}</td>
@@ -750,6 +831,7 @@ async function clienteDetalhe(cid) {
 function formCliente(c = null, onDone = route) {
   const { close } = openModal(c ? "Editar cliente" : "Novo cliente", `
     <form id="f" class="form">
+      ${lojaField(c)}
       <label>Nome<input name="nome" required value="${esc(c?.nome || "")}" /></label>
       <label>Telefone<input name="telefone" value="${esc(c?.telefone || "")}" placeholder="11999998888" /></label>
       <label>Origem<input name="origem" value="${esc(c?.origem || "PARTICULAR")}" /></label>
@@ -764,9 +846,10 @@ function formCliente(c = null, onDone = route) {
   $("#f").onsubmit = async (e) => {
     e.preventDefault();
     const d = formData(e.target);
+    delete d.__loja;
     d.base_antiga = !!e.target.base_antiga.checked;
     try {
-      c ? await db.clientes.update(c.id, d) : await db.clientes.create(d);
+      await salvarNaLoja(e.target, () => (c ? db.clientes.update(c.id, d) : db.clientes.create(d)));
       toast("Cliente salvo.");
       close();
       onDone();
@@ -783,6 +866,7 @@ function formCliente(c = null, onDone = route) {
 function formCarro(c, clienteId, onDone = route) {
   const { close } = openModal(c ? "Editar carro" : "Novo carro", `
     <form id="f" class="form">
+      ${lojaField(c)}
       <label>Placa<input name="placa" required value="${esc(c?.placa || "")}" style="text-transform:uppercase"/></label>
       <label>Veículo<input name="veiculo" value="${esc(c?.veiculo || "")}" placeholder="HRV, Civic, Moto…" /></label>
       <label>Cor<input name="cor" value="${esc(c?.cor || "")}" /></label>
@@ -794,8 +878,9 @@ function formCarro(c, clienteId, onDone = route) {
   $("#f").onsubmit = async (e) => {
     e.preventDefault();
     const d = formData(e.target);
+    delete d.__loja;
     d.cliente_id = clienteId;
-    try { c ? await db.carros.update(c.id, d) : await db.carros.create(d); toast("Carro salvo."); close(); onDone(); }
+    try { await salvarNaLoja(e.target, () => (c ? db.carros.update(c.id, d) : db.carros.create(d))); toast("Carro salvo."); close(); onDone(); }
     catch (err) { toast(err.message, "err"); }
   };
   if (c) $("[data-del]").onclick = async () => {
@@ -822,7 +907,7 @@ async function viewParceiros() {
         return `<div class="card">
           <div class="card-head"><h3>${esc(p.nome)}</h3>
             <button class="btn small ghost" data-edit="${p.id}">Editar</button></div>
-          <div style="margin-bottom:8px">${p.base_antiga ? '<span class="tag yuri">base antiga · 40/60</span>' : '<span class="tag split50">50/50</span>'}</div>
+          <div style="margin-bottom:8px">${storeTag(p.store_id)} ${p.base_antiga ? '<span class="tag yuri">base antiga · 40/60</span>' : '<span class="tag split50">50/50</span>'}</div>
           <div class="list">
             <div class="list-row"><span class="muted">Serviços</span><strong>${s.n}</strong></div>
             <div class="list-row"><span class="muted">Total</span><strong>${money(s.total)}</strong></div>
@@ -840,6 +925,7 @@ async function viewParceiros() {
 function formParceiro(p = null) {
   const { close } = openModal(p ? "Editar parceiro" : "Novo parceiro", `
     <form id="f" class="form">
+      ${lojaField(p)}
       <label>Nome<input name="nome" required value="${esc(p?.nome || "")}" /></label>
       <label>Telefone<input name="telefone" value="${esc(p?.telefone || "")}" /></label>
       <label class="check"><input type="checkbox" name="base_antiga" ${p?.base_antiga ? "checked" : ""}/>
@@ -853,8 +939,9 @@ function formParceiro(p = null) {
   $("#f").onsubmit = async (e) => {
     e.preventDefault();
     const d = formData(e.target);
+    delete d.__loja;
     d.base_antiga = !!e.target.base_antiga.checked;
-    try { p ? await db.parceiros.update(p.id, d) : await db.parceiros.create(d); toast("Salvo."); close(); route(); }
+    try { await salvarNaLoja(e.target, () => (p ? db.parceiros.update(p.id, d) : db.parceiros.create(d))); toast("Salvo."); close(); route(); }
     catch (err) { toast(err.message, "err"); }
   };
   if (p) $("[data-del]").onclick = async () => {
@@ -900,7 +987,7 @@ async function extratoParceiro(p) {
   $$("[data-pay]", card).forEach((b) => (b.onclick = async () => {
     const a = ats.find((x) => x.id === b.dataset.pay);
     await db.atendimentos.update(a.id, { status_pg: "PAGO", data_pg: today() });
-    await db.financeiro.create({ data: today(), tipo: "ENTRADA", atendimento_id: a.id, descricao: `Cobrança parceiro ${p.nome}`, valor: a.valor, base_antiga: a.base_antiga });
+    await db.access.runInStore(a.store_id || null, () => db.financeiro.create({ data: today(), tipo: "ENTRADA", atendimento_id: a.id, descricao: `Cobrança parceiro ${p.nome}`, valor: a.valor, base_antiga: a.base_antiga }));
     toast("Marcado como pago + entrada lançada.");
     closeModal(); route();
   }));
@@ -912,10 +999,10 @@ async function viewFuncionarios() {
   $("#view").innerHTML = `
     <div class="toolbar"><div></div><button class="btn primary" id="add">+ Funcionário</button></div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Nome</th><th>Telefone</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Nome</th>${storeTh()}<th>Telefone</th><th>Status</th><th></th></tr></thead>
       <tbody>${list
         .map(
-          (f) => `<tr><td><strong>${esc(f.nome)}</strong></td><td>${esc(f.telefone || "—")}</td>
+          (f) => `<tr><td><strong>${esc(f.nome)}</strong></td>${storeTd(f.store_id)}<td>${esc(f.telefone || "—")}</td>
           <td>${f.ativo ? '<span class="tag ok">ativo</span>' : '<span class="tag">inativo</span>'}</td>
           <td class="r"><button class="btn small" data-vales="${f.id}">💵 Vales</button>
             <button class="btn small ghost" data-edit="${f.id}">Editar</button></td></tr>`
@@ -966,7 +1053,7 @@ function formVale(f, onDone = route) {
   $("#fvale").onsubmit = async (e) => {
     e.preventDefault();
     const d = formData(e.target); d.valor = Number(d.valor || 0); d.funcionario_id = f.id;
-    try { await db.vales.create(d); toast("Vale registrado."); close(); onDone(); }
+    try { await db.access.runInStore(f.store_id || null, () => db.vales.create(d)); toast("Vale registrado."); close(); onDone(); }
     catch (err) { toast(err.message, "err"); }
   };
 }
@@ -974,6 +1061,7 @@ function formVale(f, onDone = route) {
 function formFunc(f = null) {
   const { close } = openModal(f ? "Editar funcionário" : "Novo funcionário", `
     <form id="f" class="form">
+      ${lojaField(f)}
       <label>Nome<input name="nome" required value="${esc(f?.nome || "")}" /></label>
       <label>Telefone<input name="telefone" value="${esc(f?.telefone || "")}" /></label>
       <label class="check"><input type="checkbox" name="ativo" ${f?.ativo !== false ? "checked" : ""}/> Ativo</label>
@@ -984,8 +1072,8 @@ function formFunc(f = null) {
     </form>`);
   $("#f").onsubmit = async (e) => {
     e.preventDefault();
-    const d = formData(e.target); d.ativo = !!e.target.ativo.checked;
-    try { f ? await db.funcionarios.update(f.id, d) : await db.funcionarios.create(d); toast("Salvo."); close(); route(); }
+    const d = formData(e.target); delete d.__loja; d.ativo = !!e.target.ativo.checked;
+    try { await salvarNaLoja(e.target, () => (f ? db.funcionarios.update(f.id, d) : db.funcionarios.create(d))); toast("Salvo."); close(); route(); }
     catch (err) { toast(err.message, "err"); }
   };
   if (f) $("[data-del]").onclick = async () => {
@@ -1077,7 +1165,8 @@ async function viewPresenca() {
         return;
       }
       try {
-        await db.presenca.upsert({ data: d.data, funcionario_id: d.funcionario_id, status: "FALTA", hora: null });
+        const loja = funcs.find((f) => f.id === d.funcionario_id)?.store_id || null;
+        await db.access.runInStore(loja, () => db.presenca.upsert({ data: d.data, funcionario_id: d.funcionario_id, status: "FALTA", hora: null }));
         ps.data = d.data;
         $("#presData").value = d.data;
         toast("Falta retroativa registrada.");
@@ -1109,7 +1198,8 @@ async function viewPresenca() {
     $$("[data-func]", host).forEach((wrap) => {
       $$("[data-st]", wrap).forEach((b) => (b.onclick = async () => {
         const hora = new Date().toTimeString().slice(0, 8);
-        await db.presenca.upsert({ data: ps.data, funcionario_id: wrap.dataset.func, status: b.dataset.st, hora });
+        const loja = funcs.find((f) => f.id === wrap.dataset.func)?.store_id || null;
+        await db.access.runInStore(loja, () => db.presenca.upsert({ data: ps.data, funcionario_id: wrap.dataset.func, status: b.dataset.st, hora }));
         toast("Presença registrada.");
         renderMarcar();
         renderHist();
@@ -1180,10 +1270,10 @@ async function viewServicos() {
   $("#view").innerHTML = `
     <div class="toolbar"><div></div><button class="btn primary" id="add">+ Serviço</button></div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Serviço</th><th class="r">Preço base</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Serviço</th>${storeTh()}<th class="r">Preço base</th><th>Status</th><th></th></tr></thead>
       <tbody>${list
         .map(
-          (s) => `<tr><td><strong>${esc(s.nome)}</strong></td><td class="r">${money(s.preco_base)}</td>
+          (s) => `<tr><td><strong>${esc(s.nome)}</strong></td>${storeTd(s.store_id)}<td class="r">${money(s.preco_base)}</td>
           <td>${s.ativo !== false ? '<span class="tag ok">ativo</span>' : '<span class="tag">inativo</span>'}</td>
           <td class="r"><button class="btn small ghost" data-edit="${s.id}">Editar</button></td></tr>`
         )
@@ -1195,6 +1285,7 @@ async function viewServicos() {
 function formServico(s = null) {
   const { close } = openModal(s ? "Editar serviço" : "Novo serviço", `
     <form id="f" class="form">
+      ${lojaField(s)}
       <label>Nome<input name="nome" required value="${esc(s?.nome || "")}" /></label>
       <label>Preço base<input name="preco_base" type="number" step="0.01" value="${s?.preco_base ?? 0}" /></label>
       <label class="check"><input type="checkbox" name="ativo" ${s?.ativo !== false ? "checked" : ""}/> Ativo</label>
@@ -1205,8 +1296,8 @@ function formServico(s = null) {
     </form>`);
   $("#f").onsubmit = async (e) => {
     e.preventDefault();
-    const d = formData(e.target); d.ativo = !!e.target.ativo.checked; d.preco_base = Number(d.preco_base || 0);
-    try { s ? await db.servicos.update(s.id, d) : await db.servicos.create(d); toast("Salvo."); close(); route(); }
+    const d = formData(e.target); delete d.__loja; d.ativo = !!e.target.ativo.checked; d.preco_base = Number(d.preco_base || 0);
+    try { await salvarNaLoja(e.target, () => (s ? db.servicos.update(s.id, d) : db.servicos.create(d))); toast("Salvo."); close(); route(); }
     catch (err) { toast(err.message, "err"); }
   };
   if (s) $("[data-del]").onclick = async () => {
@@ -1348,12 +1439,13 @@ async function viewFinanceiro() {
     ${card(`
       <div class="card-head"><h3>Lançamentos</h3></div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th class="r">Valor</th><th>Forma</th><th></th></tr></thead>
+        <thead><tr><th>Data</th>${storeTh()}<th>Tipo</th><th>Descrição</th><th class="r">Valor</th><th>Forma</th><th></th></tr></thead>
         <tbody>${list
           .slice(0, 150)
           .map(
             (l) => `<tr>
           <td>${dateBR(l.data)}</td>
+          ${storeTd(l.store_id)}
           <td>${l.tipo === "ENTRADA" ? '<span class="tag ok">entrada</span>' : '<span class="tag warn">saída</span>'}</td>
           <td>${esc(l.descricao || "")} ${l.base_antiga ? '<span class="tag yuri">40/60</span>' : ""}</td>
           <td class="r">${money(l.valor)}</td>
@@ -1570,6 +1662,7 @@ function relatorioFechamento(periodoLabel, itens, r, pct) {
 function formFinanceiro(tipo) {
   const { close } = openModal(tipo === "ENTRADA" ? "Nova entrada" : "Nova saída", `
     <form id="f" class="form">
+      ${lojaField()}
       <label>Data<input name="data" type="date" value="${today()}" required /></label>
       <label>Descrição<input name="descricao" required placeholder="${tipo === "SAIDA" ? "Ex: transporte, produtos…" : "Ex: serviço avulso"}" /></label>
       <label>Valor<input name="valor" type="number" step="0.01" required /></label>
@@ -1582,9 +1675,10 @@ function formFinanceiro(tipo) {
   $("#f").onsubmit = async (e) => {
     e.preventDefault();
     const d = formData(e.target);
+    delete d.__loja;
     d.tipo = tipo; d.valor = Number(d.valor || 0);
     d.base_antiga = tipo === "ENTRADA" ? !!e.target.base_antiga?.checked : false;
-    try { await db.financeiro.create(d); toast("Lançado."); close(); route(); }
+    try { await salvarNaLoja(e.target, () => db.financeiro.create(d)); toast("Lançado."); close(); route(); }
     catch (err) { toast(err.message, "err"); }
   };
 }
