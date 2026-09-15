@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useStore } from "@/components/StoreProvider";
-import { useStoreRows } from "@/hooks/useStoreRows";
+import { useAccountRows, useStoreRows } from "@/hooks/useStoreRows";
 import { supabase } from "@/lib/supabase";
 import { brl } from "@/lib/utils";
 
@@ -66,7 +66,7 @@ export default function NewOrderPage() {
     orderBy: "name",
     ascending: true,
   });
-  const partners = useStoreRows<Partner>("partners", {
+  const partners = useAccountRows<Partner>("partners", {
     select: "id,name",
     orderBy: "name",
     ascending: true,
@@ -92,7 +92,6 @@ export default function NewOrderPage() {
   const storeVehicles = ofStore(vehicles.rows);
   const storeServices = ofStore(services.rows);
   const storeEmployees = ofStore(employees.rows);
-  const storePartners = ofStore(partners.rows);
   const availableVehicles = useMemo(
     () =>
       customerId
@@ -221,7 +220,7 @@ export default function NewOrderPage() {
                     className="field"
                   >
                     <option value="">Selecione</option>
-                    {storePartners.map((item) => (
+                    {partners.rows.map((item) => (
                       <option key={item.id} value={item.id}>
                         {item.name}
                       </option>

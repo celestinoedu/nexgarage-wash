@@ -37,7 +37,12 @@ begin
   if p_vehicle_id is not null and not exists (select 1 from public.vehicles v where v.id = p_vehicle_id and v.store_id = p_store_id) then
     raise exception 'Invalid vehicle';
   end if;
-  if p_partner_id is not null and not exists (select 1 from public.partners p where p.id = p_partner_id and p.store_id = p_store_id) then
+  if p_partner_id is not null and not exists (
+    select 1
+    from public.partners p
+    join public.stores s on s.id = p_store_id
+    where p.id = p_partner_id and p.account_id = s.account_id
+  ) then
     raise exception 'Invalid partner';
   end if;
   if p_employee_id is not null and not exists (select 1 from public.employees e where e.id = p_employee_id and e.store_id = p_store_id) then

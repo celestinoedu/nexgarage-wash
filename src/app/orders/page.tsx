@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
   CalendarPlus,
@@ -62,11 +63,61 @@ function dateTimeBR(value: string) {
 }
 
 export default function OrdersPage() {
+  const [query, setQuery] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [status, setStatus] = useState("all");
+  const [kind, setKind] = useState("all");
+  const [payment, setPayment] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const { rows, loading, error } = useStoreRows<OrderRow>("service_orders", {
     select:
       "id,order_number,kind,status,payment_status,total,created_at,customers(name),vehicles(plate,make,model),partners(name),employees(name),service_order_items(description)",
     orderBy: "created_at",
   });
+  const filteredRows = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
+    return rows.filter((order) => {
+      const createdDate = order.created_at.slice(0, 10);
+      const searchText = [
+        `AT-${String(order.order_number).padStart(4, "0")}`,
+        order.order_number,
+        order.customers?.name,
+        order.vehicles?.plate,
+        order.vehicles?.make,
+        order.vehicles?.model,
+        order.partners?.name,
+        order.employees?.name,
+        ...order.service_order_items.map((item) => item.description),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase("pt-BR");
+      return (
+        (!normalizedQuery || searchText.includes(normalizedQuery)) &&
+        (status === "all" || order.status === status) &&
+        (kind === "all" || order.kind === kind) &&
+        (payment === "all" || order.payment_status === payment) &&
+        (!dateFrom || createdDate >= dateFrom) &&
+        (!dateTo || createdDate <= dateTo)
+      );
+    });
+  }, [dateFrom, dateTo, kind, payment, query, rows, status]);
+  const hasFilters =
+    status !== "all" ||
+    kind !== "all" ||
+    payment !== "all" ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo);
+
+  function clearFilters() {
+    setStatus("all");
+    setKind("all");
+    setPayment("all");
+    setDateFrom("");
+    setDateTo("");
+  }
+
   return (
     <AppShell
       title="Atendimentos"
@@ -87,13 +138,55 @@ export default function OrdersPage() {
             className="absolute left-3 top-3.5 text-slate-400"
           />
           <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
             className="focus-ring min-h-11 w-full rounded-xl border border-line pl-10 pr-4 text-sm"
             placeholder="Buscar por cliente, placa ou atendimento"
           />
         </label>
-        <button className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line px-4 text-sm font-bold text-slate-600">
-          <Filter size={17} /> Filtros
+        <button
+          type="button"
+          onClick={() => setFiltersOpen((open) => !open)}
+          aria-expanded={filtersOpen}
+          className={`flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-bold ${hasFilters ? "border-wash-300 bg-wash-50 text-wash-800" : "border-line text-slate-600"}`}
+        >
+          <Filter size={17} /> Filtros{hasFilters ? " ativos" : ""}
         </button>
+        {filtersOpen ? (
+          <div className="grid gap-3 border-t border-line pt-4 sm:col-span-2 sm:grid-cols-2 lg:grid-cols-5">
+            <label className="grid gap-1.5 text-xs font-bold text-slate-500">
+              Status
+              <select value={status} onChange={(event) => setStatus(event.target.value)} className="field">
+                <option value="all">Todos</option>
+                {Object.entries(statusLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+            <label className="grid gap-1.5 text-xs font-bold text-slate-500">
+              Tipo
+              <select value={kind} onChange={(event) => setKind(event.target.value)} className="field">
+                <option value="all">Todos</option>
+                {Object.entries(kindLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+            <label className="grid gap-1.5 text-xs font-bold text-slate-500">
+              Pagamento
+              <select value={payment} onChange={(event) => setPayment(event.target.value)} className="field">
+                <option value="all">Todos</option>
+                <option value="paid">Pago</option>
+                <option value="pending">Pendente</option>
+              </select>
+            </label>
+            <label className="grid gap-1.5 text-xs font-bold text-slate-500">
+              De
+              <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="field" />
+            </label>
+            <label className="grid gap-1.5 text-xs font-bold text-slate-500">
+              Até
+              <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="field" />
+            </label>
+            {hasFilters ? <button type="button" onClick={clearFilters} className="min-h-10 rounded-xl text-sm font-bold text-wash-700 sm:col-span-2 lg:col-span-5 lg:justify-self-end">Limpar filtros</button> : null}
+          </div>
+        ) : null}
       </div>
       {loading ? (
         <div className="grid min-h-48 place-items-center text-wash-700">
@@ -105,7 +198,8 @@ export default function OrdersPage() {
         </p>
       ) : (
         <div className="grid gap-3">
-          {rows.map((order) => (
+          <p className="text-sm text-slate-500">{filteredRows.length} de {rows.length} atendimentos</p>
+          {filteredRows.map((order) => (
             <Link
               href={`/orders/detail?id=${order.id}`}
               key={order.id}
@@ -158,6 +252,7 @@ export default function OrdersPage() {
               </div>
             </Link>
           ))}
+          {filteredRows.length === 0 ? <p className="rounded-2xl border border-dashed border-line bg-white p-8 text-center text-sm text-slate-500">Nenhum atendimento encontrado com os filtros selecionados.</p> : null}
         </div>
       )}
     </AppShell>

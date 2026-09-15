@@ -83,3 +83,65 @@ export function useStoreRows<T>(table: string, options: StoreRowsOptions = {}) {
     [consolidated, error, loading, refresh, rows, storeName, stores, writeStore],
   );
 }
+
+/**
+ * Cadastros compartilhados por toda a conta, independentemente da loja ativa.
+ * Parceiros usam este escopo: uma loja pode abrir um atendimento com qualquer
+ * parceiro cadastrado na mesma conta.
+ */
+export function useAccountRows<T>(table: string, options: StoreRowsOptions = {}) {
+  const { currentStore, stores } = useStore();
+  const [rows, setRows] = useState<T[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
+  const select = options.select ?? "*";
+  const orderBy = options.orderBy ?? "created_at";
+  const ascending = options.ascending ?? false;
+  const accountId = currentStore?.account_id ?? stores[0]?.account_id ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      await Promise.resolve();
+      if (!supabase) {
+        if (!cancelled) {
+          setRows([]);
+          setLoading(false);
+        }
+        return;
+      }
+      if (!accountId) {
+        if (!cancelled) {
+          setRows([]);
+          setLoading(false);
+        }
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      const { data, error: queryError } = await supabase
+        .from(table)
+        .select(select)
+        .eq("account_id", accountId)
+        .order(orderBy, { ascending });
+      if (cancelled) return;
+      if (queryError) {
+        setRows([]);
+        setError(queryError.message);
+      } else setRows((data ?? []) as unknown as T[]);
+      setLoading(false);
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId, ascending, orderBy, revision, select, table]);
+
+  const refresh = useCallback(() => setRevision((value) => value + 1), []);
+
+  return useMemo(
+    () => ({ rows, loading, error, refresh, accountId }),
+    [accountId, error, loading, refresh, rows],
+  );
+}

@@ -114,7 +114,8 @@ create table public.vehicles (
 
 create table public.partners (
   id uuid primary key default gen_random_uuid(),
-  store_id uuid not null references public.stores(id) on delete cascade,
+  account_id uuid not null references public.accounts(id) on delete cascade,
+  store_id uuid references public.stores(id) on delete set null,
   name text not null,
   document text,
   contact_name text,
@@ -245,6 +246,7 @@ create table public.store_settings (
 );
 
 create index idx_stores_account on public.stores(account_id);
+create index idx_partners_account_name on public.partners(account_id, name);
 create index idx_account_memberships_user on public.account_memberships(user_id) where active;
 create index idx_store_memberships_user on public.store_memberships(user_id) where active;
 create index idx_customers_store_name on public.customers(store_id, name);
@@ -264,6 +266,11 @@ $$;
 create function public.lock_tenant_id() returns trigger
 language plpgsql set search_path = public as $$
 begin new.store_id = old.store_id; return new; end;
+$$;
+
+create function public.lock_account_id() returns trigger
+language plpgsql set search_path = public as $$
+begin new.account_id = old.account_id; return new; end;
 $$;
 
 create function public.is_account_member(target_account uuid) returns boolean
@@ -304,6 +311,20 @@ language sql stable security definer set search_path = public as $$
       is_account_admin(s.account_id)
       or exists(select 1 from store_memberships sm where sm.store_id = s.id and sm.user_id = auth.uid() and sm.active and sm.role in ('admin', 'manager', 'operator'))
     )
+  );
+$$;
+
+create function public.can_operate_account(target_account uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select is_account_admin(target_account) or exists(
+    select 1
+    from stores s
+    join store_memberships sm on sm.store_id = s.id
+    where s.account_id = target_account
+      and s.active
+      and sm.user_id = auth.uid()
+      and sm.active
+      and sm.role in ('admin', 'manager', 'operator')
   );
 $$;
 
@@ -364,6 +385,7 @@ $$;
 create trigger on_auth_user_created after insert on auth.users for each row execute function public.handle_new_user();
 create trigger service_orders_number before insert on public.service_orders for each row execute function public.assign_order_number();
 create trigger service_order_items_store before insert or update of order_id on public.service_order_items for each row execute function public.sync_order_item_store();
+create trigger partners_lock_account before update of account_id on public.partners for each row execute function public.lock_account_id();
 
 do $$
 declare table_name text;
@@ -412,13 +434,18 @@ create policy store_settings_manage on public.store_settings for all using (can_
 do $$
 declare table_name text;
 begin
-  foreach table_name in array array['customers','vehicles','partners','employees','services','service_orders','service_order_items','attendance','employee_movements'] loop
+  foreach table_name in array array['customers','vehicles','employees','services','service_orders','service_order_items','attendance','employee_movements'] loop
     execute format('create policy %I_select on public.%I for select using (has_store_access(store_id))', table_name, table_name);
     execute format('create policy %I_insert on public.%I for insert with check (can_operate_store(store_id))', table_name, table_name);
     execute format('create policy %I_update on public.%I for update using (can_operate_store(store_id)) with check (can_operate_store(store_id))', table_name, table_name);
     execute format('create policy %I_delete on public.%I for delete using (can_manage_store(store_id))', table_name, table_name);
   end loop;
 end $$;
+
+create policy partners_select on public.partners for select using (is_account_member(account_id));
+create policy partners_insert on public.partners for insert with check (can_operate_account(account_id));
+create policy partners_update on public.partners for update using (can_operate_account(account_id)) with check (can_operate_account(account_id));
+create policy partners_delete on public.partners for delete using (is_account_admin(account_id));
 
 create policy financial_transactions_select on public.financial_transactions for select using (has_store_access(store_id));
 create policy financial_transactions_insert on public.financial_transactions for insert with check (can_manage_finance(store_id));
@@ -431,6 +458,7 @@ grant execute on function public.is_account_admin(uuid) to authenticated;
 grant execute on function public.has_store_access(uuid) to authenticated;
 grant execute on function public.can_manage_store(uuid) to authenticated;
 grant execute on function public.can_operate_store(uuid) to authenticated;
+grant execute on function public.can_operate_account(uuid) to authenticated;
 grant execute on function public.can_manage_finance(uuid) to authenticated;
 
 -- Oportunidades: última visita por cliente, respeitando a loja ativa via RLS.
