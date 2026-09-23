@@ -148,6 +148,10 @@ html[data-theme="light"] .theme-switch .ts-thumb { left: 2px; }
 .btn.block { width: 100%; }
 .btn.ok-active { background: var(--ok); border-color: var(--ok); color: #04150e; }
 .icon-btn { background: none; border: none; color: var(--txt); font-size: 20px; cursor: pointer; padding: 4px 8px; }
+.table-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 5px; white-space: nowrap; }
+.table-icon-btn { width: 29px; height: 29px; display: inline-grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); color: var(--txt); cursor: pointer; font-size: 14px; line-height: 1; }
+.table-icon-btn:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--panel-2)); }
+.table-icon-btn:disabled { opacity: .45; cursor: wait; }
 
 /* ---------- FORMS ---------- */
 input, select, textarea {

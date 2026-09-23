@@ -30,6 +30,28 @@ create table public.accounts (
   updated_at timestamptz not null default now()
 );
 
+create table public.business_profiles (
+  account_id uuid primary key references public.accounts(id) on delete cascade,
+  trade_name text not null default '',
+  legal_name text,
+  cnpj text,
+  state_registration text,
+  municipal_registration text,
+  email text,
+  phone text,
+  whatsapp text,
+  website text,
+  address_line text,
+  address_number text,
+  address_complement text,
+  district text,
+  city text,
+  state text,
+  postal_code text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table public.account_memberships (
   account_id uuid not null references public.accounts(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -344,6 +366,7 @@ declare new_account_id uuid; new_store_id uuid;
 begin
   if auth.uid() is null then raise exception 'Authentication required'; end if;
   insert into accounts(name, owner_user_id) values (trim(account_name), auth.uid()) returning id into new_account_id;
+  insert into business_profiles(account_id, trade_name) values (new_account_id, trim(account_name));
   insert into account_memberships(account_id, user_id, role) values (new_account_id, auth.uid(), 'owner');
   insert into stores(account_id, name, slug) values (new_account_id, trim(store_name), 'principal') returning id into new_store_id;
   insert into store_memberships(store_id, user_id, role) values (new_store_id, auth.uid(), 'admin');
@@ -390,7 +413,7 @@ create trigger partners_lock_account before update of account_id on public.partn
 do $$
 declare table_name text;
 begin
-  foreach table_name in array array['profiles','accounts','stores','customers','vehicles','partners','employees','services','service_orders','financial_transactions'] loop
+  foreach table_name in array array['profiles','accounts','business_profiles','stores','customers','vehicles','partners','employees','services','service_orders','financial_transactions'] loop
     execute format('create trigger %I_updated_at before update on public.%I for each row execute function public.set_updated_at()', table_name, table_name);
   end loop;
   foreach table_name in array array['customers','vehicles','partners','employees','services','service_orders','service_order_items','financial_transactions','attendance','employee_movements'] loop
@@ -400,6 +423,7 @@ end $$;
 
 alter table public.profiles enable row level security;
 alter table public.accounts enable row level security;
+alter table public.business_profiles enable row level security;
 alter table public.account_memberships enable row level security;
 alter table public.stores enable row level security;
 alter table public.store_memberships enable row level security;
@@ -420,6 +444,9 @@ create policy profiles_select_self on public.profiles for select using (id = aut
 create policy profiles_update_self on public.profiles for update using (id = auth.uid()) with check (id = auth.uid());
 create policy accounts_select_member on public.accounts for select using (is_account_member(id));
 create policy accounts_update_admin on public.accounts for update using (is_account_admin(id)) with check (is_account_admin(id));
+create policy business_profiles_select on public.business_profiles for select using (is_account_member(account_id));
+create policy business_profiles_insert on public.business_profiles for insert with check (is_account_admin(account_id));
+create policy business_profiles_update on public.business_profiles for update using (is_account_admin(account_id)) with check (is_account_admin(account_id));
 create policy account_memberships_select on public.account_memberships for select using (user_id = auth.uid() or is_account_admin(account_id));
 create policy account_memberships_manage on public.account_memberships for all using (is_account_admin(account_id)) with check (is_account_admin(account_id));
 create policy stores_select_access on public.stores for select using (has_store_access(id));
@@ -460,6 +487,7 @@ grant execute on function public.can_manage_store(uuid) to authenticated;
 grant execute on function public.can_operate_store(uuid) to authenticated;
 grant execute on function public.can_operate_account(uuid) to authenticated;
 grant execute on function public.can_manage_finance(uuid) to authenticated;
+grant select, insert, update on public.business_profiles to authenticated;
 
 -- Oportunidades: última visita por cliente, respeitando a loja ativa via RLS.
 create view public.customer_return_opportunities with (security_invoker = true) as

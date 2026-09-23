@@ -23,10 +23,7 @@ if (!skipBuild) {
   });
   if (build.status !== 0) process.exit(build.status ?? 1);
 }
-if (!existsSync(outDir)) {
-  console.error("A pasta out/ não existe. Rode sem --no-build.");
-  process.exit(1);
-}
+// A aplicação principal na raiz também funciona antes do primeiro build.
 
 const types = {
   ".html": "text/html; charset=utf-8",
@@ -64,6 +61,10 @@ function resolveFile(dir, urlPath) {
 createServer((request, response) => {
   const urlPath = new URL(request.url, "http://localhost").pathname;
   const isApp = urlPath === basePath || urlPath.startsWith(`${basePath}/`);
+  if (isApp && !existsSync(outDir)) {
+    response.writeHead(503, { "content-type": "text/plain; charset=utf-8" });
+    response.end("A interface moderna ainda não foi compilada. Execute npm run preview."); return;
+  }
   const dir = isApp ? outDir : root;
   const inner = isApp ? urlPath.slice(basePath.length) || "/" : urlPath;
 

@@ -17,3 +17,4 @@ legacy-server*.log
 .playwright-cli/
 output/playwright/
 *.tsbuildinfo
+output/migration/

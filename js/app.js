@@ -1,9 +1,10 @@
-import * as db from "./db.js?v=2.1.0";
-import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=2.1.0";
-import { renderNovoRegistro } from "./novo.js?v=2.1.0";
-import { renderRelatorios } from "./relatorios.js?v=2.1.0";
-import { renderConfiguracoes } from "./settings.js?v=2.1.0";
-import { applyVersionPreference, mountVersionToggle, showNewVersionNotice, versionToggleHTML } from "./version-switch.js?v=2.1.0";
+import * as db from "./db.js?v=2.2.8";
+import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=2.2.0";
+import { renderNovoRegistro } from "./novo.js?v=2.2.8";
+import { renderRelatorios } from "./relatorios.js?v=2.2.8";
+import { downloadOrder } from "./pdf.js?v=2.2.8";
+import { renderConfiguracoes } from "./settings.js?v=2.2.8";
+import { applyVersionPreference, mountVersionToggle, showNewVersionNotice, versionToggleHTML } from "./version-switch.js?v=2.2.0";
 
 const BASE_MENU = [
   ["dashboard", "🏠", "Início"],
@@ -25,7 +26,7 @@ const state = {
   permissions: null,
 };
 
-const APP_VERSION = "2.1.0";
+const APP_VERSION = "2.2.8";
 const menuItems = () => [...BASE_MENU, ["configuracoes", "⚙️", "Configurações"]];
 
 // Rodapé com dados da desenvolvedora + versão.
@@ -38,7 +39,7 @@ function footerHTML() {
 
 // ============================================================ TEMA
 function currentTheme() {
-  return localStorage.getItem("tl_theme") || "dark";
+  return localStorage.getItem("tl_theme") || (document.documentElement.dataset.interface === "next" ? "light" : "dark");
 }
 function applyTheme(t) {
   document.documentElement.setAttribute("data-theme", t);
@@ -296,6 +297,7 @@ function storeTd(id) {
 }
 
 function renderShell() {
+  document.title = `${state.store?.name || "Gestão automotiva"} · NexWash`;
   const storeLogo = state.store?.logo_url || "assets/logo.png";
   $("#app").innerHTML = `
     <div class="shell">
@@ -357,6 +359,7 @@ function renderShell() {
 
 // ============================================================ ROUTER
 const ROUTES = {
+  novo: async () => { await viewAtendimentos(); await renderNovoRegistro({ onSaved: () => { location.hash = "atendimentos"; } }); },
   dashboard: viewDashboard,
   atendimentos: viewAtendimentos,
   agenda: viewAgenda,
@@ -376,7 +379,7 @@ async function route() {
   document.body.classList.remove("nav-open");
   $$("[data-route]").forEach((b) => b.classList.toggle("active", b.dataset.route === id));
   const item = menuItems().find((m) => m[0] === id);
-  $("#pageTitle").textContent = item ? item[2] : "Início";
+  $("#pageTitle").textContent = item ? item[2] : id === "novo" ? "Novo atendimento" : "Início";
   $("#novoBtn").style.display = id === "configuracoes" ? "none" : "";
   $("#view").innerHTML = `<div class="loading">Carregando…</div>`;
   try {
@@ -557,7 +560,10 @@ function tableAtend(list) {
             <td>${esc(a.servicos || "")}</td>
             <td class="r">${money(a.valor)}</td>
             <td>${a.status_pg === "PAGO" ? '<span class="tag ok">pago</span>' : '<span class="tag warn">pend.</span>'}</td>
-            <td class="r"><button class="btn small ghost" data-edit-at="${a.id}">Editar</button></td>
+            <td class="r"><div class="table-actions">
+              <button class="table-icon-btn" type="button" data-pdf-at="${a.id}" title="Imprimir PDF da ${esc(a.os_numero || "OS")}" aria-label="Imprimir PDF da ${esc(a.os_numero || "OS")}">🖨️</button>
+              <button class="btn small ghost" data-edit-at="${a.id}">Editar</button>
+            </div></td>
           </tr>`;
         })
         .join("")}
@@ -593,6 +599,7 @@ async function editAtendimento(a) {
     .map((s) => `<button class="chip" type="button" data-add="${esc(s.nome)}" data-preco="${s.preco_base || 0}">+ ${esc(s.nome)} · ${money(s.preco_base)}</button>`)
     .join("");
   const { card, close } = openModal(`Editar ${a.os_numero || "atendimento"}`, `
+    <button type="button" class="btn" id="orderPdf">Baixar PDF da OS</button>
     <p class="muted small">${a.tipo === "PARCEIRO" ? "🤝" : "🚗"} ${esc(quem || "—")} — ${esc(a.veiculo || "")} ${esc(a.placa || "")}</p>
     <form id="f" class="form">
       <label>Data<input name="data" type="date" value="${esc(String(a.data).slice(0, 10))}"/></label>
@@ -617,6 +624,12 @@ async function editAtendimento(a) {
       </div>
     </form>`);
 
+  $("#orderPdf", card).onclick = async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try { await downloadOrder(a); } catch (err) { toast(err.message, "err"); }
+    finally { button.disabled = false; }
+  };
   // chips somam ao valor e anexam ao texto de serviços
   $$("[data-add]", card).forEach((b) => (b.onclick = () => {
     const sEl = $("#servEdit", card), vEl = $("#valEdit", card);
@@ -628,6 +641,11 @@ async function editAtendimento(a) {
     e.preventDefault();
     const d = formData(e.target);
     d.valor = Number(d.valor || 0);
+    // A edição livre substitui o detalhamento antigo: o PDF não pode imprimir
+    // itens e descontos que já não correspondem ao valor salvo.
+    if (d.servicos !== a.servicos || d.valor !== Number(a.valor)) {
+      d.itens_servicos = []; d.desconto = 0;
+    }
     d.data_pg = d.status_pg === "PAGO" ? (a.data_pg || d.data) : null;
     try {
       const upd = await db.atendimentos.update(a.id, d);
@@ -649,6 +667,14 @@ async function editAtendimento(a) {
 // Liga os botões "Editar" da tabela de atendimentos dentro de um container.
 function bindAtendEdits(list, root = document) {
   $$("[data-edit-at]", root).forEach((b) => (b.onclick = () => editAtendimento(list.find((a) => a.id === b.dataset.editAt))));
+  $$("[data-pdf-at]", root).forEach((button) => (button.onclick = async () => {
+    const order = list.find((item) => item.id === button.dataset.pdfAt);
+    if (!order || button.disabled) return;
+    button.disabled = true;
+    try { await downloadOrder(order); toast("Canhoto da OS gerado."); }
+    catch (err) { toast(err.message, "err"); }
+    finally { button.disabled = false; }
+  }));
 }
 
 // ============================================================ ATENDIMENTOS
@@ -867,6 +893,7 @@ function formCarro(c, clienteId, onDone = route) {
   const { close } = openModal(c ? "Editar carro" : "Novo carro", `
     <form id="f" class="form">
       ${lojaField(c)}
+      <label class="check"><input type="checkbox" name="show_all_stores" ${c?.show_all_stores !== false ? "checked" : ""}/> Mostrar em todas as lojas</label>
       <label>Placa<input name="placa" required value="${esc(c?.placa || "")}" style="text-transform:uppercase"/></label>
       <label>Veículo<input name="veiculo" value="${esc(c?.veiculo || "")}" placeholder="HRV, Civic, Moto…" /></label>
       <label>Cor<input name="cor" value="${esc(c?.cor || "")}" /></label>
@@ -880,6 +907,7 @@ function formCarro(c, clienteId, onDone = route) {
     const d = formData(e.target);
     delete d.__loja;
     d.cliente_id = clienteId;
+    d.show_all_stores = e.target.show_all_stores.checked;
     try { await salvarNaLoja(e.target, () => (c ? db.carros.update(c.id, d) : db.carros.create(d))); toast("Carro salvo."); close(); onDone(); }
     catch (err) { toast(err.message, "err"); }
   };
@@ -926,6 +954,7 @@ function formParceiro(p = null) {
   const { close } = openModal(p ? "Editar parceiro" : "Novo parceiro", `
     <form id="f" class="form">
       ${lojaField(p)}
+      <label class="check"><input type="checkbox" name="show_all_stores" ${p?.show_all_stores !== false ? "checked" : ""}/> Mostrar em todas as lojas</label>
       <label>Nome<input name="nome" required value="${esc(p?.nome || "")}" /></label>
       <label>Telefone<input name="telefone" value="${esc(p?.telefone || "")}" /></label>
       <label class="check"><input type="checkbox" name="base_antiga" ${p?.base_antiga ? "checked" : ""}/>
@@ -941,6 +970,7 @@ function formParceiro(p = null) {
     const d = formData(e.target);
     delete d.__loja;
     d.base_antiga = !!e.target.base_antiga.checked;
+    d.show_all_stores = e.target.show_all_stores.checked;
     try { await salvarNaLoja(e.target, () => (p ? db.parceiros.update(p.id, d) : db.parceiros.create(d))); toast("Salvo."); close(); route(); }
     catch (err) { toast(err.message, "err"); }
   };

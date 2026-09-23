@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     template: "%s · NexWash"
   },
   description: "Gestão multiloja para lava-rápidos e estética automotiva.",
-  icons: { icon: "/branding/favicon.svg" }
+  icons: { icon: "/assets/favicon.png" }
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

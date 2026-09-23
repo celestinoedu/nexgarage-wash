@@ -1,6 +1,6 @@
-import * as db from "./db.js?v=2.1.0";
-import { $, $$, esc, openModal, toast } from "./ui.js?v=2.1.0";
-import { setVersionPreference, versionPreference, newAppUrl } from "./version-switch.js?v=2.1.0";
+import * as db from "./db.js?v=2.2.8";
+import { $, $$, esc, openModal, toast } from "./ui.js?v=2.2.0";
+import { setVersionPreference, versionPreference, newAppUrl } from "./version-switch.js?v=2.2.0";
 
 // ---- CPF -------------------------------------------------------------------
 const onlyDigits = (value) => String(value || "").replace(/[^0-9]/g, "");
@@ -27,6 +27,27 @@ function isValidCPF(value) {
   return true;
 }
 
+function formatCNPJ(value) {
+  const digits = onlyDigits(value).slice(0, 14);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 5) return `${digits.slice(0, 2)}.${digits.slice(2)}`;
+  if (digits.length <= 8) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5)}`;
+  if (digits.length <= 12) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8)}`;
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
+}
+
+function isValidCNPJ(value) {
+  const digits = onlyDigits(value);
+  if (digits.length !== 14 || new Set(digits).size === 1) return false;
+  const checkDigit = (length) => {
+    const weights = length === 12 ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2] : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    const sum = weights.reduce((total, weight, index) => total + Number(digits[index]) * weight, 0);
+    const remainder = sum % 11;
+    return remainder < 2 ? 0 : 11 - remainder;
+  };
+  return checkDigit(12) === Number(digits[12]) && checkDigit(13) === Number(digits[13]);
+}
+
 const accountRoleLabel = (role) =>
   role === "owner" ? "Proprietário" : role === "admin" ? "Administrador" : "Membro";
 const storeRoleLabel = (role) =>
@@ -48,10 +69,11 @@ export async function renderConfiguracoes(context) {
 
   // Meus dados e Visualização valem para qualquer usuário; lojas e acessos
   // continuam restritos a proprietário e administrador.
-  const [profile, stores, users] = await Promise.all([
+  const [profile, stores, users, business] = await Promise.all([
     db.perfil.get(),
     db.access.stores(),
     isAdmin ? db.access.accountUsers(accountId) : Promise.resolve([]),
+    db.business.get(accountId),
   ]);
 
   root.innerHTML = `
@@ -63,6 +85,7 @@ export async function renderConfiguracoes(context) {
     </div>
 
     ${profileCardHTML(profile)}
+    ${businessCardHTML(business, isAdmin)}
     ${scopeCardHTML(stores)}
 
     ${!isAdmin ? "" : `
@@ -122,6 +145,7 @@ export async function renderConfiguracoes(context) {
     </div>`}`;
 
   mountProfileCard(profile, context);
+  mountBusinessCard(business, context, isAdmin);
   mountScopeCard(context);
   if (!isAdmin) return;
 
@@ -142,6 +166,96 @@ export async function renderConfiguracoes(context) {
   $$('[data-edit-user]').forEach((button) => {
     button.onclick = () => userModal({ accountId, stores, context, user: users.find((item) => item.user_id === button.dataset.editUser) });
   });
+}
+
+// ---- Dados do negócio ------------------------------------------------------
+function businessCardHTML(business, isAdmin) {
+  const disabled = isAdmin ? "" : "disabled";
+  return `
+    <div class="card">
+      <div class="card-head">
+        <div><h3>Dados do negócio</h3><p class="muted small">Informações oficiais compartilhadas entre as lojas e exibidas no cabeçalho dos PDFs.</p></div>
+      </div>
+      <form class="form" id="businessForm">
+        <div class="grid-2">
+          <label>Nome fantasia<input name="trade_name" required ${disabled} value="${esc(business?.trade_name || "")}" placeholder="Nome conhecido pelo público" /></label>
+          <label>Razão social<input name="legal_name" ${disabled} value="${esc(business?.legal_name || "")}" placeholder="Razão social registrada" /></label>
+        </div>
+        <div class="grid-2">
+          <label>CNPJ<input name="cnpj" id="businessCnpj" inputmode="numeric" maxlength="18" ${disabled} value="${esc(formatCNPJ(business?.cnpj || ""))}" placeholder="00.000.000/0000-00" /></label>
+          <label>Inscrição estadual<input name="state_registration" ${disabled} value="${esc(business?.state_registration || "")}" /></label>
+        </div>
+        <div class="grid-2">
+          <label>E-mail de contato<input name="email" type="email" ${disabled} value="${esc(business?.email || "")}" placeholder="contato@empresa.com.br" /></label>
+          <label>Telefone de contato<input name="phone" ${disabled} value="${esc(business?.phone || "")}" placeholder="(00) 0000-0000" /></label>
+        </div>
+        <div class="grid-2">
+          <label>WhatsApp<input name="whatsapp" ${disabled} value="${esc(business?.whatsapp || "")}" placeholder="(00) 00000-0000" /></label>
+          <label>Site<input name="website" ${disabled} value="${esc(business?.website || "")}" placeholder="https://" /></label>
+        </div>
+        <div class="grid-2">
+          <label>Endereço<input name="address_line" ${disabled} value="${esc(business?.address_line || "")}" placeholder="Rua ou avenida" /></label>
+          <label>Número<input name="address_number" ${disabled} value="${esc(business?.address_number || "")}" /></label>
+        </div>
+        <div class="grid-2">
+          <label>Complemento<input name="address_complement" ${disabled} value="${esc(business?.address_complement || "")}" /></label>
+          <label>Bairro<input name="district" ${disabled} value="${esc(business?.district || "")}" /></label>
+        </div>
+        <div class="grid-form">
+          <label>Cidade<input name="city" ${disabled} value="${esc(business?.city || "")}" /></label>
+          <label>UF<input name="state" maxlength="2" ${disabled} value="${esc(business?.state || "")}" /></label>
+          <label>CEP<input name="postal_code" ${disabled} value="${esc(business?.postal_code || "")}" placeholder="00000-000" /></label>
+          <label>Inscrição municipal<input name="municipal_registration" ${disabled} value="${esc(business?.municipal_registration || "")}" /></label>
+        </div>
+        ${isAdmin ? `<p class="err" id="businessError"></p><div class="row gap end"><button class="btn primary" type="submit">Salvar dados do negócio</button></div>` : `<p class="muted small">Somente proprietários e administradores podem alterar estes dados.</p>`}
+      </form>
+    </div>`;
+}
+
+function mountBusinessCard(business, context, isAdmin) {
+  const form = $("#businessForm");
+  if (!form || !isAdmin) return;
+  const cnpj = $("#businessCnpj");
+  cnpj.oninput = () => { cnpj.value = formatCNPJ(cnpj.value); };
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.target).entries());
+    const error = $("#businessError");
+    const submit = event.target.querySelector('[type="submit"]');
+    const cnpjDigits = onlyDigits(data.cnpj || "");
+    if (cnpjDigits && !isValidCNPJ(cnpjDigits)) {
+      error.textContent = "CNPJ inválido. Confira os números digitados.";
+      return;
+    }
+    const nullable = (value) => String(value || "").trim() || null;
+    error.textContent = "";
+    submit.disabled = true;
+    try {
+      await db.business.save(context.store.account_id, {
+        trade_name: data.trade_name.trim(),
+        legal_name: nullable(data.legal_name),
+        cnpj: cnpjDigits ? formatCNPJ(cnpjDigits) : null,
+        state_registration: nullable(data.state_registration),
+        municipal_registration: nullable(data.municipal_registration),
+        email: nullable(data.email),
+        phone: nullable(data.phone),
+        whatsapp: nullable(data.whatsapp),
+        website: nullable(data.website),
+        address_line: nullable(data.address_line),
+        address_number: nullable(data.address_number),
+        address_complement: nullable(data.address_complement),
+        district: nullable(data.district),
+        city: nullable(data.city),
+        state: nullable(data.state)?.toUpperCase() || null,
+        postal_code: nullable(data.postal_code),
+      });
+      toast("Dados do negócio salvos.");
+      await renderConfiguracoes(context);
+    } catch (reason) {
+      error.textContent = errorMessage(reason);
+      submit.disabled = false;
+    }
+  };
 }
 
 // ---- Meus dados ------------------------------------------------------------
@@ -255,7 +369,7 @@ function scopeCardHTML(stores) {
           active: onNewVersion,
           icon: "✨",
           title: "Versão nova",
-          detail: "Interface reformulada do NexWash. É a versão principal.",
+          detail: "Interface moderna original do NexWash.",
           action: "version-next",
         })}
         ${scopeOptionHTML({
@@ -269,7 +383,7 @@ function scopeCardHTML(stores) {
     </div>`;
 }
 
-function mountScopeCard(context) {
+function mountScopeCard() {
   $$("[data-scope-action]").forEach((button) => {
     button.onclick = () => {
       const action = button.dataset.scopeAction;
@@ -282,7 +396,7 @@ function mountScopeCard(context) {
       }
       setVersionPreference(action === "version-next" ? "next" : "legacy");
       if (action === "version-next") location.href = newAppUrl();
-      else renderConfiguracoes(context);
+      else location.href = `/?ui=legado${location.hash}`;
     };
   });
 }

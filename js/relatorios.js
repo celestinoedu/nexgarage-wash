@@ -1,6 +1,7 @@
 // Central de relatórios em Excel (.xlsx).
-import * as db from "./db.js?v=2.1.0";
-import { $, $$, today, toast } from "./ui.js?v=2.1.0";
+import * as db from "./db.js?v=2.2.8";
+import { $, $$, today, toast, esc } from "./ui.js?v=2.2.0";
+import { downloadPeriod } from "./pdf.js?v=2.2.8";
 
 const XLSX_URL = "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs";
 const MOEDA = 'R$ #,##0.00';
@@ -139,7 +140,36 @@ async function baixar(tipo, button) {
 }
 
 export async function renderRelatorios() {
+  const partners = await db.parceiros.list();
+  const partnerGroups = new Map();
+  partners.forEach((partner) => {
+    const key = String(partner.nome || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLocaleLowerCase("pt-BR");
+    if (!key) return;
+    const group = partnerGroups.get(key) ?? { name: partner.nome.trim(), ids: [] };
+    group.ids.push(partner.id);
+    partnerGroups.set(key, group);
+  });
+  const partnerOptions = [...partnerGroups.values()].sort((a, b) =>
+    a.name.localeCompare(b.name, "pt-BR"),
+  );
+  const month = today().slice(0, 7);
   $("#view").innerHTML = `
+    <form id="periodReport" class="card form" style="margin-bottom:20px">
+      <h2>Relatório por período e parceiro</h2>
+      <div class="form grid-form">
+        <label>Mês<input id="reportMonth" type="month" value="${month}" /></label>
+        <label>De<input id="reportStart" type="date" required value="${month}-01" /></label>
+        <label>Até<input id="reportEnd" type="date" required value="${today()}" /></label>
+        <label>Parceiro<select id="reportPartner"><option value="">Todos os parceiros e particulares</option>${partnerOptions.map((partner) => `<option value="${esc(partner.ids.join(","))}">${esc(partner.name)}</option>`).join("")}</select></label>
+      </div>
+      <p class="muted small">Inclui as lojas do filtro atual, valores pagos e pendentes.</p>
+      <button class="btn primary" type="submit">Baixar PDF do período</button>
+    </form>
     <div class="report-hero card">
       <div><h2>Central de Relatórios</h2><p class="muted">Exporte dados organizados e prontos para abrir no Excel.</p></div>
       <button class="btn primary" data-report="completo">📦 Baixar relatório completo</button>
@@ -149,4 +179,24 @@ export async function renderRelatorios() {
       <button class="btn block" data-report="${id}">Baixar Excel</button>
     </article>`).join("")}</div>`;
   $$('[data-report]').forEach((b) => b.onclick = () => baixar(b.dataset.report, b));
+  const setMonth = () => {
+    const value = $("#reportMonth").value;
+    if (!value) return;
+    const [year, monthNumber] = value.split("-").map(Number);
+    $("#reportStart").value = `${value}-01`;
+    $("#reportEnd").value = `${value}-${new Date(year, monthNumber, 0).getDate()}`;
+  };
+  setMonth();
+  $("#reportMonth").onchange = setMonth;
+  $("#periodReport").onsubmit = async (event) => {
+    event.preventDefault();
+    const button = event.currentTarget.querySelector('button[type="submit"]');
+    const partner = $("#reportPartner");
+    button.disabled = true; button.textContent = "Preparando PDF…";
+    try {
+      await downloadPeriod({ start: $("#reportStart").value, end: $("#reportEnd").value, partnerIds: partner.value ? partner.value.split(",") : [], partnerName: partner.selectedOptions[0].textContent });
+      toast("PDF gerado.");
+    } catch (err) { toast(err.message, "err"); }
+    finally { button.disabled = false; button.textContent = "Baixar PDF do período"; }
+  };
 }

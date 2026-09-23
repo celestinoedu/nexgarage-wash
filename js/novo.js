@@ -1,6 +1,7 @@
 // Fluxo "Novo Registro" — particular (busca por placa) ou parceiro.
-import * as db from "./db.js?v=2.1.0";
-import { $, $$, money, today, esc, norm, toast, openModal, closeModal, formData } from "./ui.js?v=2.1.0";
+import * as db from "./db.js?v=2.2.8";
+import { downloadOrder } from "./pdf.js?v=2.2.8";
+import { $, $$, money, today, esc, toast, openModal } from "./ui.js?v=2.2.0";
 
 function proximoOS(ats) {
   let max = 0;
@@ -23,7 +24,7 @@ function lojaCampoHTML() {
 }
 
 export async function renderNovoRegistro({ onSaved } = {}) {
-  const [cli, parc, servCat, ats] = await Promise.all([
+  let [cli, parc, servCat, ats] = await Promise.all([
     db.clientes.list(),
     db.parceiros.list(),
     db.servicos.list(),
@@ -50,13 +51,21 @@ export async function renderNovoRegistro({ onSaved } = {}) {
   };
 
   const { card, close } = openModal(`Novo Registro · ${osNum}`, body(), { wide: true });
+  let searchRevision = 0;
 
   // Trocar a loja no formulário troca a numeração exibida no título.
   const lojaSelect = $("#lojaRegistro", card);
   if (lojaSelect) {
-    lojaSelect.onchange = () => {
+    lojaSelect.onchange = async () => {
       const titulo = document.querySelector("#modal-root .modal-head h3");
       if (titulo) titulo.textContent = `Novo Registro · ${osDaLoja(lojaSelect.value)}`;
+      $("#salvar", card).disabled = true;
+      try {
+        [cli, parc] = await Promise.all([db.clientes.list(lojaSelect.value), db.parceiros.list(lojaSelect.value)]);
+        st.cliente_id = null; st.carro_id = null; st.parceiro_id = null; st.itens = []; st.placa = ""; st.veiculo = "";
+        renderQuem(); renderServicos(); updateTotal();
+      } catch (err) { toast(err.message, "err"); }
+      finally { $("#salvar", card).disabled = false; }
     };
   }
 
@@ -106,18 +115,23 @@ export async function renderNovoRegistro({ onSaved } = {}) {
       let deb;
       inp.oninput = () => {
         clearTimeout(deb);
+        searchRevision++;
+        st.cliente_id = null; st.carro_id = null; st.veiculo = "";
         const v = inp.value.trim();
         if (v.length < 4) { $("#placaResult", card).innerHTML = ""; return; }
         deb = setTimeout(buscarPlaca, 450);
       };
     } else {
-      const opts = parc.map((p) => `<option value="${p.id}">${esc(p.nome)}</option>`).join("");
+      const targetId = lojaSelect?.value || db.access.writeStoreId();
+      const targetAccount = db.access.knownStores().find((s) => s.id === targetId)?.account_id;
+      const opts = parc.filter((p) => p.store_id === targetId || (p.show_all_stores && p.account_id === targetAccount)).map((p) => `<option value="${p.id}">${esc(p.nome)}</option>`).join("");
       host.innerHTML = `
         <div class="grid-form form">
           <label>Parceiro
             <select id="parceiro"><option value="">Selecione…</option>${opts}<option value="__novo">+ Novo parceiro…</option></select></label>
           <label>Veículo<input id="pveiculo" placeholder="Onix, Palio…"/></label>
           <label>Placa (opcional)<input id="pplaca" style="text-transform:uppercase"/></label>
+          <label class="check"><input type="checkbox" id="sharePartner" checked/> Mostrar novo parceiro em todas as lojas</label>
         </div>
         <div id="parcInfo" class="muted small"></div>`;
       const atualizaParc = (id) => {
@@ -133,7 +147,7 @@ export async function renderNovoRegistro({ onSaved } = {}) {
           const nome = prompt("Nome do novo parceiro:");
           if (nome) {
             const base = confirm("Esse parceiro é da BASE ANTIGA (Yuri 40/60)?\n\nOK = base antiga · Cancelar = 50/50");
-            const p = await db.parceiros.create({ nome, base_antiga: base });
+            const p = await db.access.runInStore(lojaSelect?.value || null, () => db.parceiros.create({ nome, base_antiga: base, show_all_stores: $("#sharePartner", card).checked }));
             parc.push(p);
             renderQuem();
             $("#parceiro", card).value = p.id;
@@ -145,10 +159,15 @@ export async function renderNovoRegistro({ onSaved } = {}) {
   }
 
   async function buscarPlaca() {
+    const revision = ++searchRevision;
     const placa = $("#placa", card).value.trim();
     if (!placa) return;
     st.placa = placa.toUpperCase();
-    const found = await db.carros.byPlaca(placa);
+    const target = lojaSelect?.value || db.access.writeStoreId();
+    st.cliente_id = null; st.carro_id = null;
+    const found = await db.carros.byPlaca(placa, target);
+    const outdated = () => revision !== searchRevision || !$("#placa", card) || $("#placa", card).value.trim() !== placa || (lojaSelect?.value || db.access.writeStoreId()) !== target;
+    if (outdated()) return;
     const res = $("#placaResult", card);
     if (found && found.length) {
       const c = found[0];
@@ -162,7 +181,8 @@ export async function renderNovoRegistro({ onSaved } = {}) {
       };
       selecionarCarro(c);
       // busca todos os carros do cliente para permitir escolher o certo
-      const carros = await db.carros.byCliente(c.cliente_id);
+      const carros = await db.carros.byCliente(c.cliente_id, target);
+      if (outdated()) return;
       const desenhaCarros = () =>
         carros
           .map((x) => `<button type="button" class="chip ${x.id === st.carro_id ? "active" : ""}" data-carro="${x.id}">
@@ -185,13 +205,16 @@ export async function renderNovoRegistro({ onSaved } = {}) {
     } else {
       st.carro_id = null;
       st.cliente_id = null;
-      const opts = cli.map((x) => `<option value="${x.id}">${esc(x.nome)}</option>`).join("");
+      const targetClients = await db.clientes.list(target);
+      if (outdated()) return;
+      const opts = targetClients.map((x) => `<option value="${x.id}">${esc(x.nome)}</option>`).join("");
       res.innerHTML = `
         <div class="notfound">Placa não cadastrada. Escolha:</div>
         <div class="seg small">
           <button class="seg-btn active" data-novo="existente">Cliente existente</button>
           <button class="seg-btn" data-novo="novo">Novo cliente</button>
         </div>
+        <label class="check"><input type="checkbox" id="shareVehicle" checked/> Mostrar em todas as lojas</label>
         <div id="novoCadastro" class="form">
           <label>Cliente<select id="selCliente"><option value="">Selecione…</option>${opts}</select></label>
           <label>Veículo desta placa<input id="nveiculo" placeholder="HRV, Civic…"/></label>
@@ -232,7 +255,7 @@ export async function renderNovoRegistro({ onSaved } = {}) {
   function renderServicos() {
     const host = $("#servicos", card);
     const chips = servCat
-      .filter((s) => s.ativo !== false)
+      .filter((s) => s.ativo !== false && s.store_id === (lojaSelect?.value || db.access.writeStoreId()))
       .map((s) => `<button class="chip" type="button" data-serv="${esc(s.nome)}" data-preco="${s.preco_base || 0}">${esc(s.nome)} · ${money(s.preco_base)}</button>`)
       .join("");
     host.innerHTML = `
@@ -292,11 +315,23 @@ export async function renderNovoRegistro({ onSaved } = {}) {
   async function salvar() {
     // O seletor de loja define onde cliente, carro, atendimento e lançamento
     // financeiro deste registro serão gravados, sem alterar o filtro das telas.
-    return db.access.runInStore(lojaSelect?.value || null, gravar);
+    const button = $("#salvar", card);
+    if (button.disabled) return;
+    button.disabled = true;
+    try {
+      const savedOrder = await db.access.runInStore(lojaSelect?.value || null, gravar);
+      if (savedOrder) {
+        onSaved?.();
+        try { await downloadOrder(savedOrder); }
+        catch (err) { toast(`OS salva. PDF não gerado: ${err.message} Você pode baixar novamente em Atendimentos → Editar → Baixar PDF.`, "err"); }
+      }
+    }
+    finally { button.disabled = false; }
   }
 
   async function gravar() {
     try {
+      if (!st.itens.length) return toast("Adicione ao menos um serviço.", "err");
       // Resolve cliente / carro / parceiro
       if (st.tipo === "PARTICULAR") {
         const veicInput = $("#nveiculo", card);
@@ -316,7 +351,7 @@ export async function renderNovoRegistro({ onSaved } = {}) {
         if (!st.cliente_id) return toast("Busque a placa ou selecione/cadastre o cliente.", "err");
         // cria carro se a placa não existia ainda
         if (!st.carro_id && st.placa) {
-          const carro = await db.carros.create({ cliente_id: st.cliente_id, placa: st.placa, veiculo: veic });
+          const carro = await db.carros.create({ cliente_id: st.cliente_id, placa: st.placa, veiculo: veic, show_all_stores: $("#shareVehicle", card)?.checked !== false });
           st.carro_id = carro.id;
           st.veiculo = veic;
         } else if (veic) {
@@ -344,14 +379,14 @@ export async function renderNovoRegistro({ onSaved } = {}) {
       const valor = itensServicos.reduce((s, i) => s + i.valor - i.desconto, 0);
       const desconto = itensServicos.reduce((s, i) => s + i.desconto, 0);
 
-      await db.atendimentos.create({
+      const savedOrder = await db.atendimentos.create({
         // Recalculado agora, já dentro da loja de destino.
         os_numero: osDaLoja(lojaAtual()),
         data,
         tipo: st.tipo,
         cliente_id: st.tipo === "PARTICULAR" ? st.cliente_id : null,
         parceiro_id: st.tipo === "PARCEIRO" ? st.parceiro_id : null,
-        carro_id: st.carro_id,
+        carro_id: st.tipo === "PARTICULAR" ? st.carro_id : null,
         veiculo: st.veiculo,
         placa: st.placa,
         servicos: servicosTxt,
@@ -369,7 +404,7 @@ export async function renderNovoRegistro({ onSaved } = {}) {
       // pela função create_legacy_atendimento no Supabase.
       toast("Registro salvo!");
       close();
-      onSaved && onSaved();
+      return savedOrder;
     } catch (err) {
       console.error(err);
       toast(err.message || "Erro ao salvar.", "err");
@@ -377,7 +412,10 @@ export async function renderNovoRegistro({ onSaved } = {}) {
   }
 
   // wire-up
-  $$("[data-tipo]", card).forEach((b) => (b.onclick = () => { st.tipo = b.dataset.tipo; renderQuem(); }));
+  $$("[data-tipo]", card).forEach((b) => (b.onclick = () => {
+    searchRevision++; st.cliente_id = null; st.carro_id = null; st.parceiro_id = null; st.placa = ""; st.veiculo = "";
+    st.tipo = b.dataset.tipo; renderQuem();
+  }));
   $("#salvar", card).onclick = salvar;
   renderQuem();
   renderServicos();

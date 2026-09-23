@@ -16,7 +16,7 @@ npm install
 npm run dev
 ```
 
-Abra `http://localhost:3000`.
+Abra `http://localhost:4321` (legado) ou `http://localhost:4321/?ui=nova`.
 
 ## Estrutura do produto
 
@@ -31,24 +31,59 @@ Abra `http://localhost:3000`.
 - Central de configurações da conta, lojas, usuários, segurança e plano
 - Escopo de dados por loja ou consolidado entre todas as lojas
 
-## Duas versões no ar
+## Duas versões preservadas
 
-A **versão nova** (Next.js, publicada em `/app`) é a principal: quem abre a raiz do
-domínio é levado para ela. A **versão legado** (`index.html` + `js/`) continua servida na
-raiz para quem escolher voltar.
+O **legado é a referência funcional**. A versão nova mantém sua interface Next.js
+original: login, identidade visual, dashboard, navegação e demais páginas React.
+Paridade funcional significa corrigir os fluxos nessa interface, sem substituí-la
+por uma versão estilizada do legado.
 
-- Um alternador no topo de cada versão leva para a outra e grava a escolha em
-  `localStorage` (`nexwash:ui-version`), compartilhada pelas duas por estarem na mesma origem.
-- Só fica no legado quem escolheu explicitamente. `https://nexwash.lotusnegocios.com/?ui=legado`
-  é o caminho direto de volta, e também a saída caso `/app` fique indisponível.
-- A cada nova sessão no legado aparece um aviso no canto lembrando que a versão nova é a
-  principal. Ele some sozinho em alguns segundos e tem a opção "Não mostrar mais".
-- A escolha também fica em **Configurações → Visualização**, nas duas versões.
+- `/?ui=legado` abre a aplicação tradicional.
+- `/app/login/` abre o login moderno original.
+- `/?ui=nova` encaminha para `/app/dashboard/`.
+- O alternador e Configurações → Visualização salvam `nexwash:ui-version`.
+- `Lava Rapidos/` permanece como arquivo histórico, sem modificações.
 
-Para rodar a versão nova localmente no mesmo subcaminho da publicação:
+A substituição da interface moderna por redirecionamento foi revertida após a
+revisão visual do usuário. As mudanças de compartilhamento e PDF descritas abaixo
+estão implementadas no **legado**. Sua integração nas páginas React e a auditoria
+de paridade da versão nova ainda não estão concluídas. Consulte
+[a auditoria, retificação e limites da validação](docs/AUDITORIA-2026-09-22.md).
+
+## Compartilhamento e PDFs
+
+Parceiros e carros têm **Mostrar em todas as lojas**, habilitado por padrão e
+editável no cadastro. O cadastro é único; a loja de origem é preservada. O dono de
+um carro compartilhado pode ser identificado na outra loja, mas atendimentos,
+presença e financeiro continuam isolados por loja. O compartilhamento nunca cruza
+contas. Desabilitar a opção limita novos usos à loja de origem, sem apagar OS.
+
+A emissão de OS baixa um PDF automaticamente. A lista de **Atendimentos** também
+possui um botão de impressão por OS. A central de relatórios permite escolher mês
+ou datas e parceiro, seguindo o filtro de lojas, com total pago e pendente. Os PDFs
+usam o cadastro de **Configurações → Dados do negócio** no cabeçalho: nome fantasia,
+razão social, CNPJ, e-mail e telefone. Campos vazios são omitidos.
+
+Antes de publicar, aplicar `supabase/nexwash_shared_catalog.sql` após backup e
+ensaio em clone, conforme `docs/MIGRACAO-SEGURA.md`. A migração é aditiva e
+reaplicável, habilita o compartilhamento dos cadastros existentes e atualiza a
+emissão atômica de OS. **Aplicada em produção em 22/09/2026, com backup, restauração e ensaio prévios.**
+Consulte [o registro da execução](docs/MIGRACAO-COMPARTILHAMENTO-2026-09-22.md).
+Não publicar o frontend antes da migração: as consultas dependem dos novos campos
+`account_id`, `show_all_stores` e da função `list_legacy_customers`.
+
+O gerador PDF é `jspdf`, com versão fixa em `package-lock.json`. O bundle UMD e sua
+licença ficam em `assets/vendor/`, para não depender de CDN durante a emissão.
+Ao atualizar o pacote, copiar novamente o bundle e a licença de `node_modules/jspdf`.
+
+O cadastro empresarial exige `supabase/nexwash_business_profile.sql`. A migração
+foi aplicada em produção em 23/09/2026 após backup completo e preservou as
+contagens de atendimentos e financeiro.
 
 ```bash
-NEXT_PUBLIC_BASE_PATH=/app npm run build
+npm run test:catalog # PostgreSQL descartável, sem acesso à produção
+npm run lint
+npm run preview      # build da interface moderna /app e servidor na porta 4321
 ```
 
 ## Escopo de dados: por loja ou consolidado
@@ -63,7 +98,8 @@ Disponível nas **duas versões**, em **Configurações → Visualização**:
 A escolha fica em `nexwash:store-scope` e o filtro ativo em `nexwash:store-filter` —
 as mesmas chaves nas duas versões. As consultas continuam protegidas pela RLS: a visão
 consolidada apenas amplia o `store_id` consultado para as lojas às quais o usuário já
-tem acesso. Toda gravação continua indo para uma loja só, escolhida no formulário.
+tem acesso. Atendimentos e movimentos continuam vinculados à loja escolhida no formulário.
+Parceiros e carros podem ser compartilhados sem duplicação, conforme descrito acima.
 
 ## Dados do usuário
 

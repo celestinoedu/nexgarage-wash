@@ -88,7 +88,15 @@ Diferenças devem ser explicadas e aprovadas antes do corte.
 
 ## Estado atual
 
-- Nenhum SQL foi executado em Supabase.
-- Nenhuma credencial do legado ou do NexLab foi copiada para o NexWash.
-- Nenhum dado do cliente foi alterado.
-- As mudanças atuais estão restritas ao código local do novo NexWash.
+Atualizado em 22/09/2026: a migração aditiva `nexwash_shared_catalog.sql` foi
+aplicada ao banco NexWash por solicitação do usuário, após backup completo,
+restauração em clone e testes de compartilhamento/OS/financeiro. Os dados
+anteriores das 29 tabelas públicas foram reconciliados e preservados.
+
+Atualizado em 23/09/2026: a migração aditiva
+`nexwash_business_profile.sql` criou o cadastro empresarial compartilhado pelas
+lojas. Foi gerado um novo backup completo antes da aplicação e as contagens de
+contas, lojas, atendimentos e financeiro permaneceram inalteradas.
+
+Registro: [Migração de compartilhamento](MIGRACAO-COMPARTILHAMENTO-2026-09-22.md).
+Esta execução não publica frontend nem conclui a integração da interface React.

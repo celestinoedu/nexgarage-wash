@@ -61,6 +61,14 @@ function storeIds() {
 const scoped = (query) => query.in("store_id", storeIds());
 const withStore = (row) => ({ ...row, store_id: storeId() });
 
+// Cadastro único compartilhado somente dentro da conta da loja selecionada.
+const catalogScope = (query, targetId = null) => {
+  const ids = targetId ? [targetId] : storeIds();
+  const accounts = [...new Set(allStores.filter((s) => ids.includes(s.id)).map((s) => s.account_id))];
+  if (!accounts.length) return scoped(query);
+  return query.or(`store_id.in.(${ids.join(",")}),and(show_all_stores.eq.true,account_id.in.(${accounts.join(",")}))`);
+};
+
 // ---- Conta, lojas e permissões ---------------------------------------------
 export const access = {
   activeStore: () => activeStore,
@@ -222,10 +230,27 @@ export const perfil = {
   },
 };
 
+// ---- Dados do negócio ------------------------------------------------------
+// Um cadastro por conta, compartilhado entre todas as lojas e usado nos PDFs.
+export const business = {
+  get: (accountId) => supabase
+    .from("business_profiles")
+    .select("*")
+    .eq("account_id", accountId)
+    .maybeSingle()
+    .then(ok),
+  save: (accountId, row) => supabase
+    .from("business_profiles")
+    .upsert({ ...row, account_id: accountId }, { onConflict: "account_id" })
+    .select()
+    .single()
+    .then(ok),
+};
+
 // ---- Clientes --------------------------------------------------------------
 export const clientes = {
-  list: () => scoped(supabase.from("clientes").select("*")).order("nome").then(ok),
-  byId: (id) => scoped(supabase.from("clientes").select("*").eq("id", id)).single().then(ok),
+  list: (targetId = null) => supabase.rpc("list_legacy_customers", { p_store_ids: targetId ? [targetId] : storeIds() }).then(ok),
+  byId: (id) => supabase.from("clientes").select("*").eq("id", id).single().then(ok),
   create: (row) => supabase.from("clientes").insert(withStore(row)).select().single().then(ok),
   update: (id, row) => scoped(supabase.from("clientes").update(row).eq("id", id)).select().single().then(ok),
   remove: (id) => scoped(supabase.from("clientes").delete().eq("id", id)).then(ok),
@@ -233,25 +258,24 @@ export const clientes = {
 
 // ---- Carros ----------------------------------------------------------------
 export const carros = {
-  list: () => scoped(supabase.from("carros").select("*, clientes(nome,telefone)")).order("placa").then(ok),
-  byCliente: (cid) => scoped(supabase.from("carros").select("*").eq("cliente_id", cid)).then(ok),
-  byPlaca: (placa) =>
-    supabase
+  list: () => catalogScope(supabase.from("carros").select("*, clientes(nome,telefone)")).order("placa").then(ok),
+  byCliente: (cid, targetId = null) => catalogScope(supabase.from("carros").select("*").eq("cliente_id", cid), targetId).then(ok),
+  byPlaca: (placa, targetId = null) =>
+    catalogScope(supabase
       .from("carros")
       .select("*, clientes(*)")
-      .ilike("placa", placa.trim())
-      .in("store_id", storeIds())
+      .ilike("placa", placa.trim()), targetId)
       .then(ok),
-  create: (row) => supabase.from("carros").insert(withStore(row)).select().single().then(ok),
-  update: (id, row) => scoped(supabase.from("carros").update(row).eq("id", id)).select().single().then(ok),
+  create: (row) => supabase.from("carros").insert(withStore({ show_all_stores: true, ...row })).select().single().then(ok),
+  update: (id, row) => supabase.from("carros").update(row).eq("id", id).select().single().then(ok),
   remove: (id) => scoped(supabase.from("carros").delete().eq("id", id)).then(ok),
 };
 
 // ---- Parceiros -------------------------------------------------------------
 export const parceiros = {
-  list: () => scoped(supabase.from("parceiros").select("*")).order("nome").then(ok),
-  create: (row) => supabase.from("parceiros").insert(withStore(row)).select().single().then(ok),
-  update: (id, row) => scoped(supabase.from("parceiros").update(row).eq("id", id)).select().single().then(ok),
+  list: (targetId = null) => catalogScope(supabase.from("parceiros").select("*"), targetId).order("nome").then(ok),
+  create: (row) => supabase.from("parceiros").insert(withStore({ show_all_stores: true, ...row })).select().single().then(ok),
+  update: (id, row) => supabase.from("parceiros").update(row).eq("id", id).select().single().then(ok),
   remove: (id) => scoped(supabase.from("parceiros").delete().eq("id", id)).then(ok),
 };
 
@@ -283,6 +307,18 @@ export const servicos = {
 
 // ---- Atendimentos (OS) -----------------------------------------------------
 export const atendimentos = {
+  byId: (id) => supabase.from("atendimentos").select("*, clientes(nome,telefone), parceiros(nome,telefone)").eq("id", id).single().then(ok),
+  async report({ start, end, partnerIds = [], ids = storeIds() }) {
+    const rows = [];
+    for (let offset = 0; ; offset += 500) {
+      let query = supabase.from("atendimentos").select("*, clientes(nome,telefone), parceiros(nome)")
+        .in("store_id", ids).gte("data", start).lte("data", end).order("data").order("id").range(offset, offset + 499);
+      if (partnerIds.length) query = query.in("parceiro_id", partnerIds);
+      const page = await query.then(ok);
+      rows.push(...page);
+      if (page.length < 500) return rows;
+    }
+  },
   list: (limit = 300) =>
     supabase
       .from("atendimentos")
@@ -307,7 +343,8 @@ export const atendimentos = {
         p_atendimento: row,
       })
       .then(ok);
-    return { ...row, id, store_id: storeId() };
+    // O sucesso da gravação não depende da leitura posterior para o PDF.
+    return { id, store_id: storeId() };
   },
   update: (id, row) => scoped(supabase.from("atendimentos").update(row).eq("id", id)).select().single().then(ok),
   remove: (id) => scoped(supabase.from("atendimentos").delete().eq("id", id)).then(ok),
