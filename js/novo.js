@@ -1,6 +1,5 @@
 // Fluxo "Novo Registro" — particular (busca por placa) ou parceiro.
 import * as db from "./db.js?v=2.2.8";
-import { downloadOrder } from "./pdf.js?v=2.2.8";
 import { $, $$, money, today, esc, toast, openModal } from "./ui.js?v=2.2.0";
 
 function proximoOS(ats) {
@@ -322,8 +321,6 @@ export async function renderNovoRegistro({ onSaved } = {}) {
       const savedOrder = await db.access.runInStore(lojaSelect?.value || null, gravar);
       if (savedOrder) {
         onSaved?.();
-        try { await downloadOrder(savedOrder); }
-        catch (err) { toast(`OS salva. PDF não gerado: ${err.message} Você pode baixar novamente em Atendimentos → Editar → Baixar PDF.`, "err"); }
       }
     }
     finally { button.disabled = false; }

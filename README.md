@@ -58,10 +58,11 @@ um carro compartilhado pode ser identificado na outra loja, mas atendimentos,
 presença e financeiro continuam isolados por loja. O compartilhamento nunca cruza
 contas. Desabilitar a opção limita novos usos à loja de origem, sem apagar OS.
 
-A emissão de OS baixa um PDF automaticamente. A lista de **Atendimentos** também
-possui um botão de impressão por OS. A central de relatórios permite escolher mês
-ou datas e parceiro, seguindo o filtro de lojas, com total pago e pendente. Os PDFs
-usam o cadastro de **Configurações → Dados do negócio** no cabeçalho: nome fantasia,
+Ao salvar uma OS, o PDF não é baixado automaticamente. A lista de **Atendimentos**
+possui um botão para baixar o PDF de cada OS quando necessário. A central de
+relatórios permite escolher mês ou datas e parceiro, seguindo o filtro de lojas,
+com total pago e pendente. Os PDFs usam o cadastro de **Configurações → Dados do
+negócio** no cabeçalho: nome fantasia,
 razão social, CNPJ, e-mail e telefone. Campos vazios são omitidos.
 
 Antes de publicar, aplicar `supabase/nexwash_shared_catalog.sql` após backup e

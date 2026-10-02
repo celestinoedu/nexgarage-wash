@@ -1,6 +1,6 @@
 import * as db from "./db.js?v=2.2.8";
 import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=2.2.0";
-import { renderNovoRegistro } from "./novo.js?v=2.2.8";
+import { renderNovoRegistro } from "./novo.js?v=2.2.9";
 import { renderRelatorios } from "./relatorios.js?v=2.2.8";
 import { downloadOrder } from "./pdf.js?v=2.2.8";
 import { renderConfiguracoes } from "./settings.js?v=2.2.8";
