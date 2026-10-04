@@ -8,6 +8,7 @@ type StoreRowsOptions = {
   select?: string;
   orderBy?: string;
   ascending?: boolean;
+  allRows?: boolean;
 };
 
 /** Toda linha lida pelas páginas carrega a loja de origem. */
@@ -31,6 +32,7 @@ export function useStoreRows<T>(table: string, options: StoreRowsOptions = {}) {
   const select = withStoreColumn(options.select ?? "*");
   const orderBy = options.orderBy ?? "created_at";
   const ascending = options.ascending ?? false;
+  const allRows = options.allRows ?? false;
   const storeIdsKey = scopeStoreIds.join(",");
 
   useEffect(() => {
@@ -47,24 +49,34 @@ export function useStoreRows<T>(table: string, options: StoreRowsOptions = {}) {
       }
       setLoading(true);
       setError(null);
-      const query = supabase
-        .from(table)
-        .select(select)
-        .in("store_id", storeIds)
-        .order(orderBy, { ascending });
-      const { data, error: queryError } = await query;
+      const pageSize = 500;
+      const data: unknown[] = [];
+      let queryError: { message: string } | null = null;
+      for (let offset = 0; ; offset += pageSize) {
+        let query = supabase
+          .from(table)
+          .select(select)
+          .in("store_id", storeIds)
+          .order(orderBy, { ascending });
+        if (allRows) query = query.order("id", { ascending: true });
+        const result = await (allRows ? query.range(offset, offset + pageSize - 1) : query);
+        if (result.error) { queryError = result.error; break; }
+        const page = result.data ?? [];
+        data.push(...page);
+        if (!allRows || page.length < pageSize) break;
+      }
       if (cancelled) return;
       if (queryError) {
         setRows([]);
         setError(queryError.message);
-      } else setRows((data ?? []) as unknown as (T & WithStore)[]);
+      } else setRows(data as (T & WithStore)[]);
       setLoading(false);
     }
     void load();
     return () => {
       cancelled = true;
     };
-  }, [ascending, orderBy, revision, select, storeIdsKey, table]);
+  }, [allRows, ascending, orderBy, revision, select, storeIdsKey, table]);
 
   const refresh = useCallback(() => setRevision((value) => value + 1), []);
 

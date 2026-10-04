@@ -1,5 +1,6 @@
 // Camada de dados — encapsula o cliente Supabase e as queries do domínio.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { allPages } from "./pagination.mjs";
 
 const cfg = window.LAVA_CONFIG || {};
 export const isConfigured = !!(cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY);
@@ -328,6 +329,9 @@ export const atendimentos = {
       .order("created_at", { ascending: false })
       .limit(limit)
       .then(ok),
+  all: () => allPages(() => scoped(supabase.from("atendimentos")
+    .select("*, clientes(nome,telefone), parceiros(nome)"))
+    .order("data", { ascending: false }).order("id", { ascending: false })),
   byParceiro: (pid) =>
     supabase
       .from("atendimentos")
@@ -370,6 +374,8 @@ export const agenda = {
 export const financeiro = {
   list: (limit = 500) =>
     scoped(supabase.from("financeiro").select("*")).order("data", { ascending: false }).limit(limit).then(ok),
+  all: () => allPages(() => scoped(supabase.from("financeiro").select("*"))
+    .order("data", { ascending: false }).order("id", { ascending: false })),
   byAtendimento: (id) =>
     scoped(supabase.from("financeiro").select("*").eq("atendimento_id", id).eq("tipo", "ENTRADA")).then(ok),
   create: (row) => supabase.from("financeiro").insert(withStore(row)).select().single().then(ok),

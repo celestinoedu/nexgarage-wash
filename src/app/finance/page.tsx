@@ -6,6 +6,7 @@ import { AppShell } from "@/components/AppShell";
 import { DashboardCard } from "@/components/DashboardCard";
 import { StoreFilterBar, StoreTag } from "@/components/StoreScope";
 import { useStoreRows } from "@/hooks/useStoreRows";
+import { financeMetrics, paymentDate } from "@/lib/finance-metrics";
 import { brl } from "@/lib/utils";
 
 type Transaction = { id: string; kind: "income" | "expense"; category: string; description: string; amount: number; due_date: string; paid_at: string | null; payment_method: string | null; created_at: string };
@@ -35,10 +36,10 @@ export default function FinancePage() {
   const currentPeriod = useMemo(() => financialPeriod(today), [today]);
   const [dateFrom, setDateFrom] = useState(currentPeriod.start);
   const [dateTo, setDateTo] = useState(currentPeriod.end);
-  const { rows, loading, error, consolidated } = useStoreRows<Transaction>("financial_transactions", { select: "id,kind,category,description,amount,due_date,paid_at,payment_method,created_at", orderBy: "due_date" });
+  const { rows, loading, error, consolidated } = useStoreRows<Transaction>("financial_transactions", { select: "id,kind,category,description,amount,due_date,paid_at,payment_method,created_at", orderBy: "due_date", allRows: true });
 
   const periods = useMemo(() => {
-    const dates = rows.map((item) => item.due_date).filter(Boolean).sort();
+    const dates = rows.flatMap((item) => [item.due_date, paymentDate(item.paid_at, item.due_date)]).filter((date): date is string => !!date).sort();
     const first = financialPeriod(dates.length ? new Date(`${dates[0]}T12:00:00`) : today);
     const lastDate = dates.at(-1);
     const lastReference = lastDate ? new Date(Math.max(today.getTime(), new Date(`${lastDate}T12:00:00`).getTime())) : today;
@@ -52,12 +53,10 @@ export default function FinancePage() {
     return result.reverse();
   }, [rows, today]);
 
-  const filteredRows = useMemo(() => rows.filter((item) => (!dateFrom || item.due_date >= dateFrom) && (!dateTo || item.due_date <= dateTo)), [dateFrom, dateTo, rows]);
-  const paid = filteredRows.filter((item) => item.paid_at);
-  const revenue = paid.filter((item) => item.kind === "income").reduce((sum, item) => sum + Number(item.amount), 0);
-  const expenses = paid.filter((item) => item.kind === "expense").reduce((sum, item) => sum + Number(item.amount), 0);
-  const pending = filteredRows.filter((item) => !item.paid_at).reduce((sum, item) => sum + Number(item.amount), 0);
-  const overdue = filteredRows.filter((item) => !item.paid_at && new Date(`${item.due_date}T23:59:59`) < today).reduce((sum, item) => sum + Number(item.amount), 0);
+  const { revenue, expenses, balance, pending, overdue, movements: filteredRows } = useMemo(
+    () => financeMetrics(rows, { start: dateFrom, end: dateTo }, isoDate(today)),
+    [dateFrom, dateTo, rows, today],
+  );
   const selectedPeriod = `${dateFrom}:${dateTo}`;
 
   function selectPeriod(value: string) {
@@ -79,17 +78,18 @@ export default function FinancePage() {
     </section>
     {loading ? <div className="grid min-h-64 place-items-center text-wash-700"><LoaderCircle className="animate-spin" /></div> : error ? <p className="rounded-xl bg-rose-50 p-4 text-sm font-semibold text-rose-700">{error}</p> : <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <DashboardCard title="Receitas pagas" value={brl(revenue)} detail={periodLabel({ start: dateFrom, end: dateTo })} icon={Banknote} tone="success" />
-        <DashboardCard title="Despesas pagas" value={brl(expenses)} detail={periodLabel({ start: dateFrom, end: dateTo })} icon={CreditCard} tone="danger" />
-        <DashboardCard title="Saldo realizado" value={brl(revenue - expenses)} detail="receitas − despesas do período" icon={TrendingUp} tone={revenue >= expenses ? "success" : "danger"} />
-        <DashboardCard title="Vencido" value={brl(overdue)} detail={`${brl(pending)} pendente no período`} icon={AlertTriangle} tone="warning" />
+        <DashboardCard title="Receitas pagas" value={brl(revenue)} detail={`recebidas de ${periodLabel({ start: dateFrom, end: dateTo })}`} icon={Banknote} tone="success" />
+        <DashboardCard title="Despesas pagas" value={brl(expenses)} detail={`pagas de ${periodLabel({ start: dateFrom, end: dateTo })}`} icon={CreditCard} tone="danger" />
+        <DashboardCard title="Saldo realizado" value={brl(balance)} detail="receitas recebidas − despesas pagas" icon={TrendingUp} tone={balance >= 0 ? "success" : "danger"} />
+        <DashboardCard title="A receber vencido" value={brl(overdue)} detail={`${brl(pending)} a receber no período`} icon={AlertTriangle} tone="warning" />
       </div>
       <section className="mt-5 overflow-hidden rounded-2xl border border-line bg-white shadow-soft">
-        <div className="border-b border-line p-4 sm:p-5"><h2 className="text-lg font-extrabold">Movimentações do período</h2><p className="text-sm text-slate-500">{filteredRows.length} lançamentos {consolidated ? "das lojas no filtro atual" : "da loja selecionada"}</p></div>
-        <div className="hidden grid-cols-[7rem_1fr_10rem_8rem_8rem] gap-4 border-b border-line bg-slate-50 px-5 py-3 text-xs font-bold uppercase tracking-wider text-slate-400 md:grid"><span>Vencimento</span><span>Descrição</span><span>Categoria</span><span>Status</span><span className="text-right">Valor</span></div>
+        <div className="border-b border-line p-4 sm:p-5"><h2 className="text-lg font-extrabold">Movimentações do período</h2><p className="text-sm text-slate-500">Pagamentos pela data em que ocorreram; títulos em aberto pelo vencimento. {filteredRows.length} lançamentos {consolidated ? "das lojas no filtro atual" : "da loja selecionada"}</p></div>
+        <div className="hidden grid-cols-[7rem_1fr_10rem_8rem_8rem] gap-4 border-b border-line bg-slate-50 px-5 py-3 text-xs font-bold uppercase tracking-wider text-slate-400 md:grid"><span>Data</span><span>Descrição</span><span>Categoria</span><span>Status</span><span className="text-right">Valor</span></div>
         <div className="divide-y divide-line">{filteredRows.map((item) => {
-          const isOverdue = !item.paid_at && new Date(`${item.due_date}T23:59:59`) < today;
-          return <article key={item.id} className="grid gap-2 p-4 md:grid-cols-[7rem_1fr_10rem_8rem_8rem] md:items-center md:gap-4 md:px-5"><span className="text-sm font-semibold text-slate-500">{new Intl.DateTimeFormat("pt-BR").format(new Date(`${item.due_date}T12:00:00`))}</span><div className="min-w-0"><strong className="block truncate text-sm">{item.description}</strong><p className="text-xs text-slate-500">{item.payment_method ?? (item.kind === "income" ? "Receita" : "Despesa")}</p><StoreTag storeId={item.store_id} className="mt-1" /></div><span className="text-sm text-slate-600">{item.category}</span><span className={`w-fit rounded-full px-2.5 py-1 text-[10px] font-bold ${item.paid_at ? "bg-emerald-100 text-emerald-700" : isOverdue ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>{item.paid_at ? "Pago" : isOverdue ? "Vencido" : "Pendente"}</span><strong className={`text-sm md:text-right ${item.kind === "income" ? "text-emerald-700" : "text-rose-700"}`}>{item.kind === "expense" ? "− " : "+ "}{brl(Number(item.amount))}</strong></article>;
+          const isOverdue = !item.paid_at && item.due_date < isoDate(today);
+          const displayDate = paymentDate(item.paid_at, item.due_date) ?? item.due_date;
+          return <article key={item.id} className="grid gap-2 p-4 md:grid-cols-[7rem_1fr_10rem_8rem_8rem] md:items-center md:gap-4 md:px-5"><span className="text-sm font-semibold text-slate-500">{new Intl.DateTimeFormat("pt-BR").format(new Date(`${displayDate}T12:00:00`))}<small className="block font-normal">{item.paid_at ? "Pagamento" : "Vencimento"}</small></span><div className="min-w-0"><strong className="block truncate text-sm">{item.description}</strong><p className="text-xs text-slate-500">{item.payment_method ?? (item.kind === "income" ? "Receita" : "Despesa")}</p><StoreTag storeId={item.store_id} className="mt-1" /></div><span className="text-sm text-slate-600">{item.category}</span><span className={`w-fit rounded-full px-2.5 py-1 text-[10px] font-bold ${item.paid_at ? "bg-emerald-100 text-emerald-700" : isOverdue ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>{item.paid_at ? "Pago" : isOverdue ? "Vencido" : "Pendente"}</span><strong className={`text-sm md:text-right ${item.kind === "income" ? "text-emerald-700" : "text-rose-700"}`}>{item.kind === "expense" ? "− " : "+ "}{brl(Number(item.amount))}</strong></article>;
         })}{filteredRows.length === 0 ? <p className="p-8 text-center text-sm text-slate-500">Nenhum lançamento neste período.</p> : null}</div>
       </section>
     </>}

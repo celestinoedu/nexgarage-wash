@@ -1373,8 +1373,8 @@ function calcRateio(entradasList, saidas, pct) {
 
 async function viewFinanceiro() {
   const [list, ats, pctStr] = await Promise.all([
-    db.financeiro.list(1000),
-    db.atendimentos.list(1000),
+    db.financeiro.all(),
+    db.atendimentos.all(),
     db.config.get("empresa_pct", "0"),
   ]);
   // Mês financeiro do dia 15 ao dia 14 do mês seguinte.
