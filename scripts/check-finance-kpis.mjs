@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import ts from "typescript";
 import { allPages } from "../js/pagination.mjs";
+import { calcRateio, calcRateioPorLoja, splitEntrada } from "../js/rateio.mjs";
 
 const source = await readFile(resolve("src/lib/finance-metrics.ts"), "utf8");
 const compiled = ts.transpileModule(source, {
@@ -48,5 +49,19 @@ assert.equal(ledger.movements.filter((row) => row.store_id === "loja-a" && row.k
 assert.equal(ledger.movements.filter((row) => row.store_id === "loja-b" && row.kind === "income").length, 602);
 assert.equal(paymentDate("2026-09-15T01:00:00Z"), "2026-09-14");
 assert.equal(paymentDate("2026-09-15T00:00:00Z", "2026-09-15"), "2026-09-15");
+const entradas = [
+  { store_id: "loja-a", valor: 1000, base_antiga: true },
+  { store_id: "loja-b", valor: 1000, base_antiga: false },
+];
+const saidas = [
+  { store_id: "loja-a", valor: 900 },
+  { store_id: "loja-b", valor: 100 },
+];
+const rateio = calcRateioPorLoja(entradas, saidas, { "loja-a": 0, "loja-b": 0 });
+assert.deepEqual([rateio.rennan, rateio.yuri, rateio.liquido, rateio.saidasRennan, rateio.saidasYuri], [490, 510, 1000, 410, 590]);
+assert.equal(rateio.rennan, calcRateio([entradas[0]], 900, 0).rennan + calcRateio([entradas[1]], 100, 0).rennan);
+const comEmpresa = calcRateioPorLoja(entradas, saidas, { "loja-a": 0.1, "loja-b": 0 });
+assert.deepEqual([comEmpresa.empresa, comEmpresa.rennan, comEmpresa.yuri], [100, 450, 450]);
+assert.equal(splitEntrada({ valor: 0.01, base_antiga: false }).rennan + splitEntrada({ valor: 0.01, base_antiga: false }).yuri, 0.01);
 await assert.rejects(allPages(() => ({ range: async () => ({ data: null, error: new Error("falha na consulta") }) })), /falha na consulta/);
-console.log("KPIs financeiros: paginação, duas lojas, espelhos, lançamentos novos e pendências conferidos.");
+console.log("KPIs financeiros: paginação, duas lojas, espelhos, pendências e rateio por loja conferidos.");

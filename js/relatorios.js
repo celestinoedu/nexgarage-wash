@@ -1,5 +1,5 @@
 // Central de relatórios em Excel (.xlsx).
-import * as db from "./db.js?v=2.2.8";
+import * as db from "./db.js?v=2.2.10";
 import { $, $$, today, toast, esc } from "./ui.js?v=2.2.0";
 import { downloadPeriod } from "./pdf.js?v=2.2.8";
 

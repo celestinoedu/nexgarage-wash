@@ -1,4 +1,4 @@
-import * as db from "./db.js?v=2.2.8";
+import * as db from "./db.js?v=2.2.10";
 
 let library;
 function pdfLibrary() {

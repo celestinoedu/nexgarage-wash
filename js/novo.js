@@ -1,5 +1,5 @@
 // Fluxo "Novo Registro" — particular (busca por placa) ou parceiro.
-import * as db from "./db.js?v=2.2.8";
+import * as db from "./db.js?v=2.2.10";
 import { $, $$, money, today, esc, toast, openModal } from "./ui.js?v=2.2.0";
 
 function proximoOS(ats) {

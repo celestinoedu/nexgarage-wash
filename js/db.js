@@ -403,6 +403,8 @@ export const presenca = {
 
 // ---- Configurações (chave/valor) ------------------------------------------
 export const config = {
+  byStores: (chave) => scoped(supabase.from("configuracoes")
+    .select("store_id,valor").eq("chave", chave)).then(ok),
   async get(chave, fallback = null) {
     const { data, error } = await supabase
       .from("configuracoes")

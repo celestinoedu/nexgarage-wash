@@ -1,10 +1,11 @@
-import * as db from "./db.js?v=2.2.8";
+import * as db from "./db.js?v=2.2.10";
 import { $, $$, money, dateBR, today, esc, norm, toast, openModal, closeModal, confirmDialog, formData } from "./ui.js?v=2.2.0";
-import { renderNovoRegistro } from "./novo.js?v=2.2.9";
-import { renderRelatorios } from "./relatorios.js?v=2.2.8";
-import { downloadOrder } from "./pdf.js?v=2.2.8";
-import { renderConfiguracoes } from "./settings.js?v=2.2.8";
+import { renderNovoRegistro } from "./novo.js?v=2.2.10";
+import { renderRelatorios } from "./relatorios.js?v=2.2.10";
+import { downloadOrder } from "./pdf.js?v=2.2.10";
+import { renderConfiguracoes } from "./settings.js?v=2.2.10";
 import { applyVersionPreference, mountVersionToggle, showNewVersionNotice, versionToggleHTML } from "./version-switch.js?v=2.2.0";
+import { calcRateioPorLoja, splitEntrada } from "./rateio.mjs";
 
 const BASE_MENU = [
   ["dashboard", "🏠", "Início"],
@@ -1344,39 +1345,19 @@ const formaKey = (f) => {
   return "OUTRO";
 };
 
-// Divisão do período: primeiro calcula o montante a receber de cada sócio pelas regras
-// (empresa % por cima; restante Rennan 40% / Yuri 60% na base antiga, 50/50 nas demais).
-// Depois as saídas seguem a proporção consolidada dos sócios no período.
-function calcRateio(entradasList, saidas, pct) {
-  const base = entradasList.filter((l) => l.base_antiga).reduce((s, l) => s + Number(l.valor || 0), 0);
-  const comum = entradasList.filter((l) => !l.base_antiga).reduce((s, l) => s + Number(l.valor || 0), 0);
-  const total = base + comum;
-  const empresa = total * pct;
-  const restoBase = base * (1 - pct);
-  const restoComum = comum * (1 - pct);
-  const rennanBruto = restoBase * 0.40 + restoComum * 0.50;
-  const yuriBruto = restoBase * 0.60 + restoComum * 0.50;
-  const totalSocios = rennanBruto + yuriBruto;
-  // Sem entradas distribuíveis no período, mantém 50/50 para evitar uma proporção indefinida.
-  const rennanPct = totalSocios > 0 ? rennanBruto / totalSocios : 0.50;
-  const yuriPct = totalSocios > 0 ? yuriBruto / totalSocios : 0.50;
-  const saidasRennan = saidas * rennanPct;
-  const saidasYuri = saidas * yuriPct;
-  return {
-    base, comum, total, saidas, empresa, rennanPct, yuriPct, saidasRennan, saidasYuri,
-    rennanBruto, yuriBruto,
-    rennan: rennanBruto - saidasRennan,
-    yuri: yuriBruto - saidasYuri,
-    liquido: total - saidas,
-  };
-}
-
 async function viewFinanceiro() {
-  const [list, ats, pctStr] = await Promise.all([
+  const [list, ats, pctRows] = await Promise.all([
     db.financeiro.all(),
     db.atendimentos.all(),
-    db.config.get("empresa_pct", "0"),
+    db.config.byStores("empresa_pct"),
   ]);
+  const storeIds = db.access.storeIds();
+  const isMulti = storeIds.length > 1;
+  const pctByStore = Object.fromEntries(pctRows.map((row) => {
+    const value = Number(row.valor);
+    return [row.store_id, Number.isFinite(value) ? Math.max(0, Math.min(1, value / 100)) : 0];
+  }));
+  const pctStr = String(Math.round((pctByStore[storeIds[0]] || 0) * 10000) / 100);
   // Mês financeiro do dia 15 ao dia 14 do mês seguinte.
   const { inicio, fim } = mesFinanceiro();
   const periodoLabel = `${dateBR(inicio)} a ${dateBR(fim)}`;
@@ -1397,7 +1378,6 @@ async function viewFinanceiro() {
   const pendentesAts = ats.filter((a) => a.status_pg === "PENDENTE");
   const totalPendente = pendentesAts.reduce((s, a) => s + Number(a.valor || 0), 0);
 
-  const pct = Number(pctStr || 0) / 100;
   const atsMap = Object.fromEntries(ats.map((a) => [a.id, a]));
   const periodos = periodosFinanceiros(list.map((l) => l.data)); // mais recente primeiro
 
@@ -1508,14 +1488,14 @@ async function viewFinanceiro() {
     const label = `${dateBR(periodo.inicio)} a ${dateBR(periodo.fim)}`;
     const doP = list.filter((l) => { const dd = String(l.data).slice(0, 10); return dd >= periodo.inicio && dd <= periodo.fim; });
     const entP = doP.filter((l) => l.tipo === "ENTRADA");
-    const saiP = doP.filter((l) => l.tipo === "SAIDA").reduce((s, l) => s + Number(l.valor || 0), 0);
-    const r = calcRateio(entP, saiP, pct);
+    const saiP = doP.filter((l) => l.tipo === "SAIDA");
+    const r = calcRateioPorLoja(entP, saiP, pctByStore);
+    const pctLabel = isMulti ? "por loja" : `${pctStr}%`;
+    const pctInfo = storeIds.map((id) => `${esc(db.access.storeName(id))}: ${(100 * (pctByStore[id] || 0)).toFixed(2)}%`).join(" · ");
     const itens = entP.map((l) => {
-      const valor = Number(l.valor || 0), distribuivel = valor * (1 - pct);
       return {
-        ...l, atendimento: atsMap[l.atendimento_id], recebido: valor, empresa: valor * pct,
-        rennan: distribuivel * (l.base_antiga ? 0.40 : 0.50),
-        yuri: distribuivel * (l.base_antiga ? 0.60 : 0.50),
+        ...l, atendimento: atsMap[l.atendimento_id],
+        ...splitEntrada(l, pctByStore[l.store_id] || 0),
       };
     });
     const servicos = itens.filter((l) => l.atendimento_id);
@@ -1526,28 +1506,28 @@ async function viewFinanceiro() {
         ${card(`
           <div class="card-head"><h3>💰 Montante a receber (${label})</h3>
             <button class="btn small" id="relFechamento">📄 Relatório de fechamento</button></div>
-          <p class="muted small">A % da empresa sai primeiro. Do restante, clientes da <strong>base antiga</strong> são divididos em Rennan 40% / Yuri 60% e clientes da <strong>base nova</strong> em 50% / 50%. O peso consolidado dessas entradas define também o rateio proporcional das saídas do período.</p>
-          <div class="row gap" style="align-items:flex-end;margin-bottom:12px">
+          <p class="muted small">A % da empresa sai primeiro. Do restante, clientes da <strong>base antiga</strong> são divididos em Rennan 40% / Yuri 60% e clientes da <strong>base nova</strong> em 50% / 50%. As saídas de cada loja são rateadas pelo mix de entradas daquela loja; o consolidado soma os fechamentos.</p>
+          ${isMulti ? `<p class="muted small">% da empresa por loja: ${pctInfo}. Filtre uma loja para alterar seu percentual.</p>` : `<div class="row gap" style="align-items:flex-end;margin-bottom:12px">
             <label style="flex:0 0 140px">% da empresa
               <input id="empresaPct" type="number" min="0" max="100" step="1" value="${esc(pctStr || 0)}"/></label>
             <button class="btn primary" id="salvarPct">Salvar %</button>
-          </div>
+          </div>`}
           <div class="list" style="margin-bottom:12px">
             <div class="list-row"><span class="muted">Entradas (bruto)</span><strong>${money(r.total)}</strong></div>
             <div class="list-row"><span class="muted">(−) Saídas do período</span><strong class="warn-txt">${money(r.saidas)}</strong></div>
             <div class="list-row"><span>Lucro líquido</span><strong>${money(r.liquido)}</strong></div>
           </div>
           <div class="split split-3">
-            <div class="split-box"><span>Empresa (${esc(pctStr || 0)}%)</span><strong>${money(r.empresa)}</strong></div>
+            <div class="split-box"><span>Empresa (${esc(pctLabel)})</span><strong>${money(r.empresa)}</strong></div>
             <div class="split-box clickable" data-extrato="rennan" role="button" tabindex="0" title="Ver extrato do Rennan"><span>Rennan 🔍</span><strong>${money(r.rennan)}</strong></div>
             <div class="split-box clickable" data-extrato="yuri" role="button" tabindex="0" title="Ver extrato do Yuri"><span>Yuri 🔍</span><strong>${money(r.yuri)}</strong></div>
           </div>
-          <p class="muted small" style="margin-top:8px">Rateio das saídas neste período: <strong>Rennan ${(r.rennanPct * 100).toFixed(2)}%</strong> (${money(r.saidasRennan)}) e <strong>Yuri ${(r.yuriPct * 100).toFixed(2)}%</strong> (${money(r.saidasYuri)}). Esses percentuais refletem o mix de clientes das bases antiga e nova. Clique no sócio para ver o extrato.</p>`)}
+          <p class="muted small" style="margin-top:8px">Rateio das saídas neste período: <strong>Rennan ${(r.rennanPct * 100).toFixed(2)}%</strong> (${money(r.saidasRennan)}) e <strong>Yuri ${(r.yuriPct * 100).toFixed(2)}%</strong> (${money(r.saidasYuri)}). ${isMulti ? "Percentuais efetivos após o rateio separado em cada loja." : "Percentuais definidos pelo mix de clientes da loja."} Clique no sócio para ver o extrato.</p>`)}
       </div>
 
       ${card(`
         <div class="card-head"><h3>🧮 Montante por serviço (${label})</h3></div>
-        <p class="muted small">Montante bruto de cada serviço por sócio (antes de abater as saídas). A parte da empresa (${esc(pctStr || 0)}%) sai por cima; o restante segue 40/60 (base antiga) ou 50/50 (base nova). As saídas são rateadas pela proporção consolidada resultante: Rennan ${(r.rennanPct * 100).toFixed(2)}% e Yuri ${(r.yuriPct * 100).toFixed(2)}%.</p>
+        <p class="muted small">Montante bruto de cada serviço por sócio (antes de abater as saídas). A parte da empresa (${esc(pctLabel)}) sai por cima; o restante segue 40/60 (base antiga) ou 50/50 (base nova). As saídas são rateadas em cada loja; neste resumo, Rennan ${(r.rennanPct * 100).toFixed(2)}% e Yuri ${(r.yuriPct * 100).toFixed(2)}%.</p>
         <div class="table-wrap"><table>
           <thead><tr><th>Data</th><th>Cliente / serviço</th><th>Regra</th><th class="r">Recebido</th><th class="r">Empresa</th><th class="r">Rennan</th><th class="r">Yuri</th></tr></thead>
           <tbody>${servicos.length ? servicos.map((l) => {
@@ -1559,14 +1539,14 @@ async function viewFinanceiro() {
           ${servicos.length ? `<tfoot><tr><td colspan="3"><strong>Total dos serviços</strong></td><td class="r"><strong>${money(totServ.rec)}</strong></td><td class="r"><strong>${money(totServ.emp)}</strong></td><td class="r"><strong>${money(totServ.ren)}</strong></td><td class="r"><strong>${money(totServ.yur)}</strong></td></tr></tfoot>` : ""}
         </table></div>`) }`;
 
-    $("#salvarPct").onclick = async () => {
+    if (!isMulti) $("#salvarPct").onclick = async () => {
       const v = Math.max(0, Math.min(100, Number($("#empresaPct").value || 0)));
       await db.config.set("empresa_pct", v);
       toast("% da empresa salva."); route();
     };
-    $("#relFechamento").onclick = () => relatorioFechamento(label, itens, r, pctStr || 0);
+    $("#relFechamento").onclick = () => relatorioFechamento(label, itens, r, isMulti ? "por loja" : pctStr);
     $$('[data-extrato]').forEach((b) => {
-      const abrir = () => extratoDistribuicao(b.dataset.extrato, itens, r, pctStr || 0, label);
+      const abrir = () => extratoDistribuicao(b.dataset.extrato, itens, r, isMulti ? "por loja" : pctStr, label);
       b.onclick = abrir;
       b.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); } };
     });
@@ -1599,9 +1579,9 @@ function extratoDistribuicao(socio, itens, r, pctLabel, periodoLabel) {
       <td class="r"><strong>${money(valSocio)}</strong></td>
     </tr>`;
   }).join("");
-  const notaPct = Number(pctLabel) ? ` (após ${esc(pctLabel)}% da empresa)` : "";
+  const notaPct = pctLabel === "por loja" ? " (após a parte da empresa de cada loja)" : Number(pctLabel) ? ` (após ${esc(pctLabel)}% da empresa)` : "";
   openModal(`Montante a receber — ${nome}`, `
-    <p class="muted small">Período <strong>${esc(periodoLabel)}</strong>. Em cada serviço o ${nome} recebe o percentual da sua base${notaPct}. No final, as saídas são abatidas na proporção consolidada das entradas: <strong>${(socioPct * 100).toFixed(2)}%</strong> para ${nome}.</p>
+    <p class="muted small">Período <strong>${esc(periodoLabel)}</strong>. Em cada serviço o ${nome} recebe o percentual da sua base${notaPct}. As saídas são rateadas dentro de cada loja. A parcela total do ${nome} equivale a <strong>${(socioPct * 100).toFixed(2)}%</strong> das saídas exibidas.</p>
     <div class="table-wrap"><table>
       <thead><tr><th>Data</th><th>Cliente / serviço</th><th>Regra</th><th class="r">Recebido</th><th class="r">% ${nome}</th><th class="r">${nome}</th></tr></thead>
       <tbody>${linhas || `<tr><td colspan="6" class="empty small">Sem entradas no período.</td></tr>`}</tbody>
@@ -1616,6 +1596,7 @@ function extratoDistribuicao(socio, itens, r, pctLabel, periodoLabel) {
 // Abre uma janela imprimível com o fechamento geral do período:
 // divisão de cada sócio detalhada por serviço (estratificada) e consolidada.
 function relatorioFechamento(periodoLabel, itens, r, pct) {
+  const pctLabel = pct === "por loja" ? pct : `${pct}%`;
   const rows = itens.slice().sort((a, b) => String(a.data).localeCompare(String(b.data)));
   const linhas = rows.map((l) => {
     const a = l.atendimento;
@@ -1654,7 +1635,7 @@ function relatorioFechamento(periodoLabel, itens, r, pct) {
       <div class="box"><span>Lucro líquido</span><strong>${money(r.liquido)}</strong></div>
     </div>
     <div class="boxes">
-      <div class="box"><span>Empresa (${pct}%)</span><strong>${money(r.empresa)}</strong></div>
+      <div class="box"><span>Empresa (${pctLabel})</span><strong>${money(r.empresa)}</strong></div>
       <div class="box"><span>Rennan a receber</span><strong>${money(r.rennan)}</strong></div>
       <div class="box"><span>Yuri a receber</span><strong>${money(r.yuri)}</strong></div>
     </div>
@@ -1663,10 +1644,10 @@ function relatorioFechamento(periodoLabel, itens, r, pct) {
     <table><tbody>
       <tr><td>Entradas base antiga (40/60)</td><td class="tot">${money(r.base)}</td></tr>
       <tr><td>Entradas demais (50/50)</td><td class="tot">${money(r.comum)}</td></tr>
-      <tr><td>Parte da empresa (${pct}%)</td><td class="tot">${money(r.empresa)}</td></tr>
+      <tr><td>Parte da empresa (${pctLabel})</td><td class="tot">${money(r.empresa)}</td></tr>
       <tr><td>Montante bruto Rennan</td><td class="tot">${money(r.rennanBruto)}</td></tr>
       <tr><td>Montante bruto Yuri</td><td class="tot">${money(r.yuriBruto)}</td></tr>
-      <tr><td>(−) Saídas do período (rateio proporcional ao mix das bases)</td><td class="tot">${money(r.saidas)}</td></tr>
+      <tr><td>(−) Saídas do período (rateio por loja conforme o mix das bases)</td><td class="tot">${money(r.saidas)}</td></tr>
       <tr><td>Parte das saídas — Rennan (${(r.rennanPct * 100).toFixed(2)}%)</td><td class="tot">${money(r.saidasRennan)}</td></tr>
       <tr><td>Parte das saídas — Yuri (${(r.yuriPct * 100).toFixed(2)}%)</td><td class="tot">${money(r.saidasYuri)}</td></tr>
       <tr class="sum"><td><strong>Rennan a receber</strong></td><td class="tot"><strong>${money(r.rennan)}</strong></td></tr>

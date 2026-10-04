@@ -1,4 +1,4 @@
-import * as db from "./db.js?v=2.2.8";
+import * as db from "./db.js?v=2.2.10";
 import { $, $$, esc, openModal, toast } from "./ui.js?v=2.2.0";
 import { setVersionPreference, versionPreference, newAppUrl } from "./version-switch.js?v=2.2.0";
 
