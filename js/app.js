@@ -27,7 +27,7 @@ const state = {
   permissions: null,
 };
 
-const APP_VERSION = "2.2.8";
+const APP_VERSION = "2.2.11";
 const menuItems = () => [...BASE_MENU, ["configuracoes", "⚙️", "Configurações"]];
 
 // Rodapé com dados da desenvolvedora + versão.
@@ -544,15 +544,22 @@ function splitTag(a) {
   return a.base_antiga ? '<span class="tag yuri">40/60</span>' : '<span class="tag split50">50/50</span>';
 }
 
-function tableAtend(list) {
+// Com `selected`, a tabela ganha caixas de seleção nos atendimentos pendentes.
+function tableAtend(list, selected = null) {
   if (!list.length) return `<div class="empty">Sem atendimentos.</div>`;
+  const pendentes = list.filter((a) => a.status_pg !== "PAGO");
+  const todos = pendentes.length > 0 && pendentes.every((a) => selected?.has(a.id));
+  const selTh = selected ? `<th class="sel-col"><input type="checkbox" data-sel-all ${todos ? "checked" : ""} ${pendentes.length ? "" : "disabled"} title="Selecionar pendentes" aria-label="Selecionar todos os pendentes"/></th>` : "";
   return `<div class="table-wrap"><table>
-    <thead><tr><th>Data</th><th>OS</th>${storeTh()}<th>Cliente / Parceiro</th><th>Veículo</th><th>Serviços</th><th class="r">Valor</th><th>Pg</th><th></th></tr></thead>
+    <thead><tr>${selTh}<th>Data</th><th>OS</th>${storeTh()}<th>Cliente / Parceiro</th><th>Veículo</th><th>Serviços</th><th class="r">Valor</th><th>Pg</th><th></th></tr></thead>
     <tbody>
       ${list
         .map((a) => {
           const quem = a.tipo === "PARCEIRO" ? a.parceiros?.nome : a.clientes?.nome;
+          const selTd = !selected ? "" : a.status_pg === "PAGO" ? `<td class="sel-col"></td>`
+            : `<td class="sel-col"><input type="checkbox" data-sel-at="${a.id}" ${selected.has(a.id) ? "checked" : ""} aria-label="Selecionar ${esc(a.os_numero || "atendimento")}"/></td>`;
           return `<tr>
+            ${selTd}
             <td>${dateBR(a.data)}</td>
             <td>${esc(a.os_numero || "")}</td>
             ${storeTd(a.store_id)}
@@ -689,27 +696,97 @@ async function viewAtendimentos() {
         <option value="PENDENTE">Somente pendentes</option>
         <option value="PAGO">Somente pagos</option>
       </select>
+      <button class="btn" id="considerarPago" disabled>Considerar Pago</button>
       <button class="btn primary" id="novo2">+ Novo Registro</button>
     </div>
-    <div id="atTable">${tableAtend(list)}</div>`;
+    <div id="atTable"></div>`;
   $("#novo2").onclick = () => renderNovoRegistro({ onSaved: route });
-  bindAtendEdits(list);
+
+  // A seleção vale só para os pendentes visíveis: ao filtrar, o que sai da
+  // tela deixa de estar selecionado, para não marcar nada que não se vê.
+  const selected = new Set();
+  let visiveis = list;
+  const atualizarBotao = () => {
+    const btn = $("#considerarPago");
+    btn.disabled = selected.size === 0;
+    btn.textContent = selected.size ? `Considerar Pago (${selected.size})` : "Considerar Pago";
+  };
+  const render = () => {
+    const ids = new Set(visiveis.filter((a) => a.status_pg !== "PAGO").map((a) => a.id));
+    [...selected].forEach((id) => { if (!ids.has(id)) selected.delete(id); });
+    $("#atTable").innerHTML = tableAtend(visiveis, selected);
+    bindAtendEdits(list);
+    $$("[data-sel-at]").forEach((c) => (c.onchange = () => {
+      if (c.checked) selected.add(c.dataset.selAt); else selected.delete(c.dataset.selAt);
+      const all = $("[data-sel-all]");
+      if (all) all.checked = ids.size > 0 && [...ids].every((id) => selected.has(id));
+      atualizarBotao();
+    }));
+    const all = $("[data-sel-all]");
+    if (all) all.onchange = () => {
+      ids.forEach((id) => (all.checked ? selected.add(id) : selected.delete(id)));
+      $$("[data-sel-at]").forEach((c) => (c.checked = all.checked));
+      atualizarBotao();
+    };
+    atualizarBotao();
+  };
 
   // Busca e status de pagamento são aplicados juntos.
   const aplicar = () => {
     const t = norm($("#q").value);
     const status = $("#atFiltro").value;
-    const f = list.filter((a) =>
+    visiveis = list.filter((a) =>
       (status === "TODOS" || (status === "PAGO" ? a.status_pg === "PAGO" : a.status_pg !== "PAGO")) &&
       [a.os_numero, a.placa, a.veiculo, a.servicos, a.clientes?.nome, a.parceiros?.nome]
         .map(norm)
         .some((x) => x.includes(t))
     );
-    $("#atTable").innerHTML = tableAtend(f);
-    bindAtendEdits(list);
+    render();
   };
   $("#q").oninput = aplicar;
   $("#atFiltro").onchange = aplicar;
+  $("#considerarPago").onclick = () => considerarPago(list.filter((a) => selected.has(a.id)));
+  render();
+}
+
+// Marca vários atendimentos como pagos após confirmação, lançando a entrada
+// de cada um no caixa pela mesma regra da edição individual.
+function considerarPago(rows) {
+  if (!rows.length) return;
+  const total = rows.reduce((s, a) => s + Number(a.valor || 0), 0);
+  const { card, close } = openModal("Considerar pago", `
+    <p class="muted" style="margin-bottom:14px">${rows.length === 1 ? "1 atendimento selecionado" : `${rows.length} atendimentos selecionados`}, no total de <strong>${money(total)}</strong>.
+      Eles passarão a constar como pagos e a entrada de cada um será lançada no caixa na data abaixo.</p>
+    <form id="pagoForm" class="form">
+      <label>Data do pagamento<input name="data_pg" type="date" required value="${today()}"/></label>
+      <div class="row gap end">
+        <button type="button" class="btn ghost" data-no>Cancelar</button>
+        <button type="submit" class="btn primary">Confirmar pagamento</button>
+      </div>
+    </form>`);
+  $("[data-no]", card).onclick = close;
+  $("#pagoForm", card).onsubmit = async (e) => {
+    e.preventDefault();
+    const dataPg = formData(e.target).data_pg;
+    const submit = $("[type=submit]", card);
+    $$("button", card).forEach((b) => (b.disabled = true));
+    let ok = 0;
+    const falhas = [];
+    for (const a of rows) {
+      submit.textContent = `Salvando ${ok + falhas.length + 1} de ${rows.length}…`;
+      try {
+        const upd = await db.atendimentos.update(a.id, { status_pg: "PAGO", data_pg: dataPg });
+        await syncFinanceiro({ ...a, status_pg: "PAGO", data_pg: dataPg, ...upd });
+        ok++;
+      } catch (err) {
+        falhas.push(`${a.os_numero || "Atendimento"}: ${err.message}`);
+      }
+    }
+    close();
+    if (falhas.length) toast(`${ok} marcado(s) como pago; ${falhas.length} com erro. ${falhas[0]}`, "err");
+    else toast(ok === 1 ? "Atendimento marcado como pago + entrada lançada." : `${ok} atendimentos marcados como pagos + entradas lançadas.`);
+    route();
+  };
 }
 
 // ============================================================ AGENDA

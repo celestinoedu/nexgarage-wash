@@ -236,8 +236,10 @@ tr:hover td { background: rgba(255,255,255,.02); }
 .split-box.clickable:active { transform: translateY(1px); }
 
 /* ---------- TOOLBAR / SEARCH ---------- */
-.toolbar { display: flex; gap: 12px; margin-bottom: 16px; align-items: center; }
-.toolbar .search { flex: 1; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; align-items: center; }
+.toolbar .search { flex: 1 1 220px; min-width: 0; }
+.sel-col { width: 34px; padding-right: 0; }
+.sel-col input { width: 16px; height: 16px; padding: 0; margin: 2px 0 0; accent-color: var(--primary); cursor: pointer; }
 .inline-date { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
 .inline-date input { width: auto; }
 select.mini { width: auto; max-width: 220px; padding: 6px 10px; font-size: 13px; }
